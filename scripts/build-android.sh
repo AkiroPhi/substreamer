@@ -9,7 +9,7 @@
 #   scripts/build-android.sh --gradle-only --release  # release variant via Gradle
 #
 # Environment:
-#   JAVA_HOME    – Android Studio bundled JBR (auto-detected)
+#   JAVA_HOME    – first JDK 17-24 found (Android Studio JBR, ~/.gradle/jdks, /Library/Java)
 #   ANDROID_HOME – Android SDK (auto-detected at ~/Library/Android/sdk)
 
 set -euo pipefail
@@ -17,12 +17,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ── Java (Android Studio bundled JBR) ────────────────────────────────────────
-JAVA_HOME_PATH="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-if [[ ! -d "$JAVA_HOME_PATH" ]]; then
-  echo "Error: JAVA_HOME not found at $JAVA_HOME_PATH"
-  echo "       Install Android Studio or set JAVA_HOME manually."
+source "$REPO_ROOT/scripts/java-home.sh"
+JAVA_HOME_PATH=$(resolve_java_home) || {
+  echo "Error: no JDK 17-24 found (Android Studio's JBR, ~/.gradle/jdks, /Library/Java)."
+  echo "       Gradle 8.14 cannot run on Java 25; install a JDK 17-21."
   exit 1
-fi
+}
 export JAVA_HOME="$JAVA_HOME_PATH"
 export PATH="$JAVA_HOME/bin:$PATH"
 
@@ -46,9 +46,16 @@ cd "$REPO_ROOT"
 
 if [[ "${1:-}" == "--gradle-only" ]]; then
   shift
-  echo "==> Running ./gradlew assembleDebug $*"
+  # `--release` selects the variant; it is not a Gradle option, so consume it
+  # here rather than forwarding it to the task.
+  TASK="assembleDebug"
+  ARGS=()
+  for arg in "$@"; do
+    if [[ "$arg" == "--release" ]]; then TASK="assembleRelease"; else ARGS+=("$arg"); fi
+  done
+  echo "==> Running ./gradlew $TASK ${ARGS[*]:-}"
   cd android
-  ./gradlew assembleDebug "$@"
+  ./gradlew "$TASK" ${ARGS[@]+"${ARGS[@]}"}
 else
   echo "==> Running npx expo run:android $*"
   npx expo run:android "$@"

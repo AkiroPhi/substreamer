@@ -59,10 +59,10 @@ which disproved both assumptions and identified the actual defect in the one ser
 
 For anything beyond a trivial fix, plan before you touch code, and get the plan approved before you implement:
 
-1. **Write the plan** to `plans/` (see §10 Plans). State the goal, the steps, and how each step is verified.
+1. **Write the plan** to `plans/` (see section 10, Plans). State the goal, the steps, and how each step is verified.
 2. **Review it adversarially** — a subagent, or a deliberate second pass hunting for what is wrong with it. The reviewer's job is to find defects, not to agree.
 3. **Assess every finding on the evidence.** Read the actual source and confirm or refute it. A finding is not true because a reviewer asserted it, and not false because it is inconvenient. Say which it is.
-4. **Fix the plan** for the findings that hold. If a finding reveals a defect in shipped code, it goes IN SCOPE — never deferred (§12).
+4. **Fix the plan** for the findings that hold. If a finding reveals a defect in shipped code, it goes IN SCOPE — never deferred (section 12).
 5. **Iterate 2–4** until a review produces no new valid findings. Resolve every open question with evidence; a plan containing "investigate X during implementation" is not finished.
 6. **Submit the clean plan for approval. Never start significant implementation without it.** Sequencing decisions, scope changes and reversals of an earlier decision go back to the user too.
 7. **Keep the plan current** as you implement — deviations, surprises, final state, test results.
@@ -174,12 +174,12 @@ For every task:
 After every session where the agent did something wrong:
 
 1. Ask: was the mistake because this file lacks a rule, or because the agent ignored a rule?
-2. If lacking: add the rule — a project fact to §11, a working correction to §12 — as concretely as possible ("Always use X for Y", not "be careful with Y").
+2. If lacking: add the rule — a project fact to section 11, a working correction to section 12 — as concretely as possible ("Always use X for Y", not "be careful with Y").
 3. If ignored: the rule may be too long, too vague, or buried. Tighten it or move it up.
 4. Every few weeks, prune. For each line, ask: "Would removing this cause the agent to make a mistake?" If no, delete. Bloated AGENTS.md files get ignored wholesale.
-5. **Re-verify §10 against `package.json` and the tree whenever the stack moves.** Every version line in it was wrong by the time it was next read — an agent that trusts a stale fact goes looking for a library that isn't there.
+5. **Re-verify section 10 against `package.json` and the tree whenever the stack moves.** Every version line in it was wrong by the time it was next read — an agent that trusts a stale fact goes looking for a library that isn't there.
 
-Aim for ~300 lines of rules; over 500 you are fighting your own config. §11 is exempt from the diet — it is the expensive-to-rediscover material, and it should grow when something bites us and shrink when a subsystem is retired.
+Aim for ~300 lines of rules; over 500 you are fighting your own config. Section 11 is exempt from the diet — it is the expensive-to-rediscover material, and it should grow when something bites us and shrink when a subsystem is retired.
 
 ---
 
@@ -246,7 +246,7 @@ src/
   components/   reusable UI
   hooks/        custom hooks
   services/     API clients + integrations (plain async functions, no classes)
-  db/           persistence — THE data layer (see §11)
+  db/           persistence — THE data layer (see section 11)
     client.ts     op-SQLite connection + the `InternalDb` surface every module uses
     schema.ts     normalized schema (source of truth; DDL generated from it)
     repository/   per-entity SQL: albums, artists, songs, playlists, favorites, search…
@@ -261,7 +261,9 @@ src/
 modules/        local Expo native modules (expo-async-fs, expo-ssl-trust, expo-gzip,
                 expo-image-colors, expo-image-resize, expo-move-to-back,
                 expo-backup-exclusions, subsonic-api)
-plans/          local working docs (gitignored)
+plans/          local working docs — plans, reports, handovers (gitignored)
+docs/           the GitHub Pages SITE (index.html, privacy, assets). Never put a plan or
+                report here — it publishes to the public website
 fastlane/       store-listing metadata
 scripts/        build helpers + CI validators
 ```
@@ -399,7 +401,7 @@ Prefer Symdex MCP server (when available) over Glob/Grep for symbol lookup, file
 
 ### Testing reality
 
-- **Jest reproduces the SUBMISSION order, not the pool.** The substitute (`src/db/testing/opSqliteBetterSqlite3.ts`) carries op-SQLite's transaction lock, so which writes are visible to a later read is checkable in the suite — that is JS scheduling. What it cannot reproduce is the native pool draining underneath: no thread, no interleaving window mid-batch. A concurrency claim of that kind still needs a throwaway on-device spike; that is how the open-savepoint window (§ "The write path") was found. The rebuild's spike screens were deleted on 2026-08-08 — recover one from git history rather than reasoning from the suite.
+- **Jest reproduces the SUBMISSION order, not the pool.** The substitute (`src/db/testing/opSqliteBetterSqlite3.ts`) carries op-SQLite's transaction lock, so which writes are visible to a later read is checkable in the suite — that is JS scheduling. What it cannot reproduce is the native pool draining underneath: no thread, no interleaving window mid-batch. A concurrency claim of that kind still needs a throwaway on-device spike; that is how the open-savepoint window (section 11, "The write path") was found. The rebuild's spike screens were deleted on 2026-08-08 — recover one from git history rather than reasoning from the suite.
 - Where a hazard is device-only, say so in the plan rather than implying the suite covers it.
 
 ---
@@ -410,6 +412,7 @@ Prefer Symdex MCP server (when available) over Glob/Grep for symbol lookup, file
 
 When the user corrects your approach, append a one-line rule here before ending the session. Write it concretely ("Always use X for Y"), never abstractly ("be careful with Y"). If an existing line already covers the correction, tighten it instead of adding a new one. Remove lines when the underlying issue goes away (model upgrades, refactors, process changes).
 
+- **Plain text only — never typographic symbols like the section sign, pilcrow, daggers or similar as shorthand.** Write "section 12", not a glyph. Applies to every artefact the agent writes: chat, plans, commit messages, comments, docs. The glyphs are ambiguous to read aloud, unsearchable, and look like noise in a terminal.
 - **Never defer a pre-existing defect you find on the way.** If work uncovers a bug in shipped code, it goes in scope and gets its own commit. Do not relay a subagent's "out of scope" as if it were settled.
 - **Don't soften a rule to fit what the code does.** A lazy `require()` in a service was described as "adjacent to the rule" because the rule said "store actions"; it was a breach. When shipped code violates the *rationale* of a rule, the finding is a breach and the rule's wording is what needs fixing.
 - **Migrations run SEQUENTIALLY, in id order, exactly ONCE per install. Stop reasoning about old migrations as if they could fire after the current model landed.** `getPendingTasks` returns `id > completedVersion` and runs them in order, so a lower-numbered task can never execute after a higher-numbered one, for anybody. An old migration is history: it runs only for an install that has not reached that version, and always *before* everything after it. Two wrong claims came out of forgetting this — "m17 will re-add `raw_json` so the drop brings the column back" (it cannot; m17 runs first, the drop runs later, end state is dropped) and framing a within-chain ordering question as old migrations interfering with the remodel. If a genuine ordering concern exists it is between two tasks *in the same run*, so say which two and in which order — never "an old migration might run later". **And an old migration is FROZEN: it writes the model that existed when it was written, and is never retro-fitted to a later schema.** "Should m14 also write the new tables?" is not a question — m14 predates them. A new migration handles the new model; that is what new migrations are for.

@@ -21,7 +21,8 @@ jest.mock('../../BottomSheet', () => {
   };
 });
 
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 
 import { SHEET_TITLE } from '../copy';
 import { RoutePickerSheet } from '../RoutePickerSheet';
@@ -36,6 +37,9 @@ describe('RoutePickerSheet', () => {
   beforeEach(() => {
     rnqp.Cast.startDiscovery.mockClear();
     rnqp.Cast.stopDiscovery.mockClear();
+    rnqp.Cast.requestLocalNetworkPermission.mockClear();
+    rnqp.Cast.getLocalNetworkPermissionState.mockReturnValue('granted');
+    rnqp.__setCastSnapshot({});
     act(() => useRoutePickerStore.getState().close());
   });
 
@@ -53,6 +57,28 @@ describe('RoutePickerSheet', () => {
     expect(screen.getByText(SHEET_TITLE)).toBeTruthy();
     // Discovery is scoped to the open sheet (mounted inner content only).
     expect(rnqp.Cast.startDiscovery).toHaveBeenCalled();
+    // Already granted: no probe (and no prompt) needed.
+    expect(rnqp.Cast.requestLocalNetworkPermission).not.toHaveBeenCalled();
+    await flush();
+  });
+
+  it('runs the local-network probe when the permission is not yet granted', async () => {
+    rnqp.Cast.getLocalNetworkPermissionState.mockReturnValue('undetermined');
+    act(() => useRoutePickerStore.getState().open());
+    render(<RoutePickerSheet />);
+    expect(rnqp.Cast.requestLocalNetworkPermission).toHaveBeenCalledTimes(1);
+    await flush();
+  });
+
+  it('shows the denied state with a tappable Open Settings when local network is denied', async () => {
+    rnqp.__setCastSnapshot({ permission: 'denied' });
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    act(() => useRoutePickerStore.getState().open());
+    render(<RoutePickerSheet />);
+    expect(screen.getByText('Local Network access denied')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('route-picker-open-settings'));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    openSettings.mockRestore();
     await flush();
   });
 

@@ -8,12 +8,12 @@
 #   npm run android:device
 #
 
-JAVA_HOME_PATH="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-if [[ ! -d "$JAVA_HOME_PATH" ]]; then
-  echo "Error: JAVA_HOME not found at $JAVA_HOME_PATH"
-  echo "       Install Android Studio or set JAVA_HOME manually."
+source "$(dirname "${BASH_SOURCE[0]}")/java-home.sh"
+JAVA_HOME_PATH=$(resolve_java_home) || {
+  echo "Error: no JDK 17-24 found (Android Studio's JBR, ~/.gradle/jdks, /Library/Java)."
+  echo "       Gradle 8.14 cannot run on Java 25; install a JDK 17-21."
   return 1 2>/dev/null || exit 1
-fi
+}
 
 ANDROID_SDK_PATH="$HOME/Library/Android/sdk"
 if [[ ! -d "$ANDROID_SDK_PATH" ]]; then

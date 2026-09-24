@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons/static';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Cast, useAudioRoute } from 'react-native-queue-player';
 
 import { BottomSheet } from '../BottomSheet';
@@ -141,9 +141,19 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
           <Text style={{ color: t.errorIndicator, fontWeight: '600' }}>
             Local Network access denied
           </Text>
-          <Text style={{ color: t.textSubtle, fontSize: 12, marginTop: 4 }}>
-            Open Settings to grant Local Network for this app.
-          </Text>
+          {/* iOS asks once; after a denial only Settings can change the answer. */}
+          <Pressable
+            testID="route-picker-open-settings"
+            onPress={() => {
+              void Linking.openSettings();
+            }}
+            accessibilityRole="button"
+            hitSlop={8}
+          >
+            <Text style={{ color: t.accent, fontSize: 12, marginTop: 4 }}>
+              Open Settings to grant Local Network for this app.
+            </Text>
+          </Pressable>
         </View>
       )}
       {state === 'error' && (

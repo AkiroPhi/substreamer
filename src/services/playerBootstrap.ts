@@ -37,7 +37,9 @@ void getTrackPlayer()
     // Our mild gray-waveform placeholder (matches the in-app cover-art
     // placeholder) in place of RNQP's built-in. Needs a local file:// URI.
     placeholderArtworkUri: ensureNowPlayingPlaceholderUri(),
-    autoRetries: 3,
+    // Siri catalog donation (headlessMediaService) is inert unless opted in
+    // here; the plugin's `siri: true` supplies the entitlement it requires.
+    voiceVocabularyDonationEnabled: true,
     lookaheadCacheMaxSizeMb: LOOKAHEAD_MAX_CACHE_MB,
     // LRU keeps the most-recently-played tracks (best for a client where users
     // re-listen). RNQP's default is already 'lru'; pinned here for clarity.

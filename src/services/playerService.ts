@@ -300,21 +300,13 @@ export async function initPlayer(): Promise<void> {
 /**
  * True when the shared engine already holds an ACTIVE session this process
  * lifetime — a car/Siri browse tap started playback (via `playTrack`) before the
- * phone UI mounted. `configure()` wipes the engine on every launch, so a
- * non-empty active queue at boot can only be this-process car/Siri.
+ * phone UI mounted. `configure()` wipes the engine on every launch (index -1),
+ * so a loaded queue at boot can only be this-process car/Siri; one that already
+ * played to its end is a leftover, not a session to adopt.
  */
 function hasLiveEngineSession(): boolean {
-  const queue = tp.getQueue();
-  const idx = tp.getCurrentTrackIndex();
-  if (queue.length === 0 || idx < 0 || idx >= queue.length) return false;
-  const state = tp.getState();
-  return (
-    state === 'playing' ||
-    state === 'buffering' ||
-    state === 'loading' ||
-    state === 'paused' ||
-    state === 'error'
-  );
+  if (tp.getCurrentTrackIndex() < 0) return false;
+  return tp.getState() !== 'ended';
 }
 
 /**
@@ -541,28 +533,42 @@ export async function playTrack(
   }
 }
 
-/** Toggle between play and pause. */
+/**
+ * Toggle between play and pause. At the end of the queue the engine is parked
+ * and `play()` alone restarts nothing, so Play there means the last track again
+ * from the start: a same-index skip resets it and leaves the ended state.
+ */
 export async function togglePlayPause(): Promise<void> {
   await awaitHydration();
-  if (tp.getState() === 'playing') {
+  const state = tp.getState();
+  if (state === 'playing') {
     await tp.pause();
-  } else {
-    // Covers a returning user resuming a restored queue via the mini-player.
-    maybePromptFireBackgroundPlayback();
-    await tp.play();
+    return;
   }
+  // Covers a returning user resuming a restored queue via the mini-player.
+  maybePromptFireBackgroundPlayback();
+  if (state === 'ended') await tp.skipToIndex(tp.getCurrentTrackIndex());
+  await tp.play();
 }
 
-/** Skip to the next track in the queue. */
+/**
+ * Skip to the next track. A skip issued after the queue ended seats the target
+ * paused (the engine's play intent ends with the queue), so only that case adds
+ * the play; from any live state the skip carries on as is.
+ */
 export async function skipToNext(): Promise<void> {
   await awaitHydration();
+  const wasEnded = tp.getState() === 'ended';
   await tp.skipToNext();
+  if (wasEnded) await tp.play();
 }
 
-/** Skip to the previous track in the queue. */
+/** Skip to the previous track in the queue (see `skipToNext` for the ended case). */
 export async function skipToPrevious(): Promise<void> {
   await awaitHydration();
+  const wasEnded = tp.getState() === 'ended';
   await tp.skipToPrevious();
+  if (wasEnded) await tp.play();
 }
 
 /** Whether skip-to-previous is possible (native restarts the current track if

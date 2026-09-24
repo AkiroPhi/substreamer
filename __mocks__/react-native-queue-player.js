@@ -10,6 +10,17 @@
 
 const listeners = {};
 
+// Lookahead-cache status. v2 reads it asynchronously and delivers it once on
+// `onCacheStatusChange` subscribe; tests set it via `__setCacheStatus`.
+const DEFAULT_CACHE_STATUS = {
+  enabled: true,
+  currentSizeMb: 0,
+  maxSizeMb: 512,
+  tracksFullyCached: 0,
+  currentlyCaching: [],
+};
+let cacheStatus = { ...DEFAULT_CACHE_STATUS };
+
 function makeSub(name) {
   return (cb) => {
     (listeners[name] = listeners[name] || []).push(cb);
@@ -26,7 +37,7 @@ const trackPlayer = {
   addToQueue: jest.fn(() => Promise.resolve()),
   removeFromQueue: jest.fn(() => Promise.resolve()),
   moveInQueue: jest.fn(() => Promise.resolve()),
-  getQueue: jest.fn(() => []),
+  getQueue: jest.fn(() => Promise.resolve([])),
   clearQueue: jest.fn(() => Promise.resolve()),
   play: jest.fn(() => Promise.resolve()),
   pause: jest.fn(() => Promise.resolve()),
@@ -69,13 +80,7 @@ const trackPlayer = {
   setBrowseSnapshot: jest.fn(),
   donateVoiceVocabulary: jest.fn(),
   setLookaheadCache: jest.fn(() => Promise.resolve()),
-  getLookaheadCacheStatus: jest.fn(() => ({
-    enabled: true,
-    currentSizeMb: 0,
-    maxSizeMb: 512,
-    tracksFullyCached: 0,
-    currentlyCaching: [],
-  })),
+  getLookaheadCacheStatus: jest.fn(() => Promise.resolve(cacheStatus)),
   clearLookaheadCache: jest.fn(() => Promise.resolve()),
   setReplayGainMode: jest.fn(() => Promise.resolve()),
   getReplayGainMode: jest.fn(() => 'off'),
@@ -100,7 +105,14 @@ const trackPlayer = {
   onPlayFromSearchRequest: makeSub('playFromSearch'),
   onPlayFromIdRequest: makeSub('playFromId'),
   onServiceReady: makeSub('serviceReady'),
-  onCacheStatusChange: makeSub('cacheStatus'),
+  // Delivers the current status once on subscribe (async), like the native side.
+  onCacheStatusChange: (cb) => {
+    const off = makeSub('cacheStatus')(cb);
+    void Promise.resolve().then(() => {
+      if ((listeners.cacheStatus || []).includes(cb)) cb(cacheStatus);
+    });
+    return off;
+  },
 };
 
 const cast = {
@@ -111,6 +123,8 @@ const cast = {
   connect: jest.fn(() => Promise.resolve()),
   disconnect: jest.fn(() => Promise.resolve()),
   showSystemPicker: jest.fn(() => Promise.resolve()),
+  getLocalNetworkPermissionState: jest.fn(() => 'granted'),
+  requestLocalNetworkPermission: jest.fn(() => Promise.resolve('granted')),
   CastErrorCodes: { CONNECT_FAILED: 'cast_connect_failed', AUTH_REQUIRED: 'cast_auth_required' },
 };
 
@@ -153,6 +167,16 @@ const equalizer = {
   onBandChange: jest.fn(() => () => {}),
   onEnabledChange: jest.fn((cb) => { cb(eqEnabled); return () => {}; }),
 };
+
+// --- Cast hook snapshot; tests override via `__setCastSnapshot` ---
+const DEFAULT_CAST_SNAPSHOT = {
+  route: { castProtocol: 'local', name: '', receiverId: '' },
+  receivers: [],
+  isDiscovering: false,
+  permission: 'granted',
+  isAvailable: true,
+};
+let castSnapshot = { ...DEFAULT_CAST_SNAPSHOT };
 
 // --- Automotive (CarPlay / Android Auto) ---
 const SectionIcon = {
@@ -208,16 +232,10 @@ module.exports = {
   useSleepTimer: () => ({ active: false, endOfTrack: false }),
   useBufferState: () => 'empty',
   useNowPlayingFormat: () => null,
-  useCast: () => ({
-    route: { castProtocol: 'local', name: '', receiverId: '' },
-    receivers: [],
-    isDiscovering: false,
-    permission: 'granted',
-    isAvailable: true,
-  }),
+  useCast: () => ({ ...castSnapshot }),
   useAudioRoute: () => ({ kind: 'speaker', name: '' }),
   useLookaheadCache: () => ({
-    status: trackPlayer.getLookaheadCacheStatus(),
+    status: cacheStatus,
     setConfig: trackPlayer.setLookaheadCache,
     clear: trackPlayer.clearLookaheadCache,
   }),
@@ -226,7 +244,15 @@ module.exports = {
   __emit: (name, ...args) => {
     (listeners[name] || []).forEach((cb) => cb(...args));
   },
+  __setCacheStatus: (next) => {
+    cacheStatus = { ...DEFAULT_CACHE_STATUS, ...next };
+  },
+  __setCastSnapshot: (next) => {
+    castSnapshot = { ...DEFAULT_CAST_SNAPSHOT, ...next };
+  },
   __resetPlayerMock: () => {
+    cacheStatus = { ...DEFAULT_CACHE_STATUS };
+    castSnapshot = { ...DEFAULT_CAST_SNAPSHOT };
     for (const k of Object.keys(listeners)) delete listeners[k];
     for (const key of Object.keys(trackPlayer)) {
       if (typeof trackPlayer[key]?.mockClear === 'function') trackPlayer[key].mockClear();

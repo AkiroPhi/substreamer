@@ -33,7 +33,7 @@ describe('LookaheadCacheCard', () => {
   beforeEach(() => {
     mockTP.setLookaheadCache.mockClear();
     mockTP.clearLookaheadCache.mockClear();
-    mockTP.getLookaheadCacheStatus.mockReturnValue({
+    rnqp.__setCacheStatus({
       enabled: true,
       currentSizeMb: 12,
       maxSizeMb: 512,
@@ -61,7 +61,7 @@ describe('LookaheadCacheCard', () => {
   });
 
   it('hides the usage bar when caching is off and the cache is empty', () => {
-    mockTP.getLookaheadCacheStatus.mockReturnValue({
+    rnqp.__setCacheStatus({
       enabled: false,
       currentSizeMb: 0,
       maxSizeMb: 512,

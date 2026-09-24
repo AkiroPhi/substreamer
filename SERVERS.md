@@ -12,7 +12,31 @@ documentation page so a future reader can verify it.
 **Read-only clones of the servers we support live in `reference/`** (gitignored — see
 `reference/README.md` for the folder layout and refresh commands). Behaviour recorded here is read
 from those sources and cited as `reference/<server>/<path>:<line>`. Do not record an observation,
-an inferred mechanism, or a comment from our own code as a finding — see `AGENTS.md` §1.
+an inferred mechanism, or a comment from our own code as a finding — see `AGENTS.md` section 1.
+
+---
+
+## Note for Navidrome users: song IDs changed in 0.64.0
+
+Navidrome 0.64.0 introduced a change that re-encodes internal IDs that were stored in older
+formats. If you have been running Navidrome for a while, this may affect you.
+
+Substreamer keeps a local copy of your library so it can work offline and load quickly. When
+the server changes its IDs, that local copy no longer matches the server — and there is no way
+for the app to tell whether or when your server made the change. You may see albums that will
+not play, artwork that will not load, or downloaded music the app no longer recognises.
+
+**If you are on Substreamer 8.0.91 or earlier:** log out and log back in. That clears the local
+copy and rebuilds it from the server. You will need to download any music you want offline
+again.
+
+**The next release will handle this for you.** It adds a start-up check that detects an affected
+server and runs a one-time repair, bringing your library back into sync automatically — without
+re-downloading your offline music.
+
+Substreamer-only data is migrated as part of that repair, including your listening history and
+bookmarks. If you have already done the log-out-and-back-in fix, the automatic repair will still
+restore those Substreamer-only items for you.
 
 ---
 

@@ -52,6 +52,7 @@ const mockSetQueueLoading = jest.fn();
 const mockSetQueueFormats = jest.fn();
 const mockClearQueueFormats = jest.fn();
 const mockAddQueueFormat = jest.fn();
+const mockSetTrackSource = jest.fn();
 
 const buildPlayerState = () => ({
   ...playerStoreState,
@@ -65,6 +66,7 @@ const buildPlayerState = () => ({
   setQueueFormats: mockSetQueueFormats,
   addQueueFormat: mockAddQueueFormat,
   clearQueueFormats: mockClearQueueFormats,
+  setTrackSource: mockSetTrackSource,
 });
 
 jest.mock('../../store/playerStore', () => ({

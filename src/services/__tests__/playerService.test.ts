@@ -198,6 +198,9 @@ beforeEach(async () => {
 
   const { playerStore } = require('../../store/playerStore');
   (playerStore.getState as jest.Mock).mockReturnValue(defaultPlayerState());
+  // clearAllMocks keeps persistent return values; pin the engine's idle defaults.
+  mockTP.getState.mockReturnValue('none');
+  mockTP.getCurrentTrackIndex.mockReturnValue(-1);
 
   playbackSettingsStore.setState({
     repeatMode: 'off',
@@ -237,7 +240,6 @@ describe('restorePersistedQueueAfterBoot — live car-session adoption', () => {
     mockSetCurrentTrack.mockClear();
 
     // Engine reports a live playing session; a STALE queue sits on disk.
-    mockTP.getQueue.mockReturnValue([{ id: 'c1' }, { id: 'c2' }]);
     mockTP.getState.mockReturnValue('playing');
     mockTP.getCurrentTrackIndex.mockReturnValue(0);
     mockGetPersistedQueue.mockReturnValue({ queue: [makeChild('OLD')], currentTrackIndex: 0 });
@@ -257,7 +259,6 @@ describe('restorePersistedQueueAfterBoot — live car-session adoption', () => {
     mockTP.setQueue.mockClear();
     mockTP.play.mockClear();
 
-    mockTP.getQueue.mockReturnValue([{ id: 'c1' }]);
     mockTP.getState.mockReturnValue('paused');
     mockTP.getCurrentTrackIndex.mockReturnValue(0);
 
@@ -268,7 +269,6 @@ describe('restorePersistedQueueAfterBoot — live car-session adoption', () => {
   });
 
   it('falls through to the normal restore when the engine is empty', async () => {
-    mockTP.getQueue.mockReturnValue([]);
     mockTP.getState.mockReturnValue('none');
     mockTP.getCurrentTrackIndex.mockReturnValue(-1);
     mockGetPersistedQueue.mockReturnValue({
@@ -284,7 +284,6 @@ describe('restorePersistedQueueAfterBoot — live car-session adoption', () => {
   });
 
   it('does NOT adopt an ended leftover queue — falls through to restore', async () => {
-    mockTP.getQueue.mockReturnValue([{ id: 'x' }]);
     mockTP.getState.mockReturnValue('ended');
     mockTP.getCurrentTrackIndex.mockReturnValue(0);
     mockGetPersistedQueue.mockReturnValue({ queue: [makeChild('p1')], currentTrackIndex: 0 });
@@ -339,6 +338,18 @@ describe('togglePlayPause', () => {
     mockTP.getState.mockReturnValueOnce('paused');
     await togglePlayPause();
     expect(mockTP.play).toHaveBeenCalled();
+    expect(mockTP.skipToIndex).not.toHaveBeenCalled();
+  });
+
+  it('after the queue ended, restarts the last active track from 0 then plays', async () => {
+    mockTP.getState.mockReturnValueOnce('ended');
+    mockTP.getCurrentTrackIndex.mockReturnValueOnce(4);
+    await togglePlayPause();
+    expect(mockTP.skipToIndex).toHaveBeenCalledWith(4);
+    expect(mockTP.play).toHaveBeenCalledTimes(1);
+    expect(mockTP.skipToIndex.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTP.play.mock.invocationCallOrder[0],
+    );
   });
 });
 
@@ -348,6 +359,31 @@ describe('transport passthroughs', () => {
     expect(mockTP.skipToNext).toHaveBeenCalled();
     await skipToPrevious();
     expect(mockTP.skipToPrevious).toHaveBeenCalled();
+    expect(mockTP.play).not.toHaveBeenCalled();
+  });
+
+  it.each(['playing', 'paused', 'buffering'] as const)(
+    'a skip from %s never adds a play',
+    async (state) => {
+      mockTP.getState.mockReturnValue(state);
+      await skipToNext();
+      await skipToPrevious();
+      expect(mockTP.play).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a skip after the queue ended plays once the skip has landed', async () => {
+    mockTP.getState.mockReturnValueOnce('ended');
+    await skipToNext();
+    expect(mockTP.play).toHaveBeenCalledTimes(1);
+    expect(mockTP.skipToNext.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTP.play.mock.invocationCallOrder[0],
+    );
+
+    mockTP.play.mockClear();
+    mockTP.getState.mockReturnValueOnce('ended');
+    await skipToPrevious();
+    expect(mockTP.play).toHaveBeenCalledTimes(1);
   });
 
   it('seekTo passes through and clamps negatives to 0', async () => {

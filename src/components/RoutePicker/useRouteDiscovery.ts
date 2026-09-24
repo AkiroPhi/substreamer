@@ -28,6 +28,12 @@ export function useRouteDiscovery(): UseRouteDiscoveryResult {
   const [errorById, setErrorById] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    // The probe is what resolves `permission` (discovery alone never does) and,
+    // on iOS, what raises the system prompt on first use — here, where the user
+    // is looking for devices. Android below target 37 is always granted.
+    if (Cast.getLocalNetworkPermissionState() !== 'granted') {
+      Cast.requestLocalNetworkPermission().catch(() => {});
+    }
     Cast.startDiscovery().catch(() => {});
     return () => {
       void Cast.stopDiscovery();

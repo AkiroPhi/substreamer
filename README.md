@@ -19,6 +19,11 @@
 
 </div>
 
+> [!IMPORTANT]
+> **Navidrome users:** Navidrome 0.64.0 re-encodes internal IDs stored in older formats, which can
+> leave Substreamer's locally cached library out of sync with your server.
+> [More info](SERVERS.md#note-for-navidrome-users-song-ids-changed-in-0640).
+
 ## Screenshots
 
 <p align="center">

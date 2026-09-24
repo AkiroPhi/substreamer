@@ -129,8 +129,33 @@ export function childToTrack(
     album: child.album ?? undefined,
     artworkUrl,
     duration: child.duration ?? 0,
+    ...replayGainFields(child),
   };
 }
+
+/**
+ * The server's ReplayGain values in the player's shape. Any of the four fields
+ * makes the player use these instead of the file's tags, so a song without
+ * server values gets none. A peak of 0 is "not measured" (Gonic) and is dropped.
+ */
+function replayGainFields(child: Child): ReplayGainFields {
+  const rg = child.replayGain;
+  const out: ReplayGainFields = {};
+  if (!rg) return out;
+  const finite = (v: number | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
+  if (finite(rg.trackGain)) out.replayGainTrackGain = rg.trackGain;
+  if (finite(rg.trackPeak) && rg.trackPeak > 0) out.replayGainTrackPeak = rg.trackPeak;
+  if (finite(rg.albumGain)) out.replayGainAlbumGain = rg.albumGain;
+  if (finite(rg.albumPeak) && rg.albumPeak > 0) out.replayGainAlbumPeak = rg.albumPeak;
+  return out;
+}
+
+type ReplayGainFields = Partial<
+  Pick<
+    TrackItem,
+    'replayGainTrackGain' | 'replayGainTrackPeak' | 'replayGainAlbumGain' | 'replayGainAlbumPeak'
+  >
+>;
 
 /**
  * Build (RNQP tracks, filtered child queue) from a Child queue, dropping
