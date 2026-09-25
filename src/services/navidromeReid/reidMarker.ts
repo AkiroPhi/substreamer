@@ -17,7 +17,7 @@
 
 import { kvStorageSync } from '../../store/persistence';
 import { serverInfoStore } from '../../store/serverInfoStore';
-import { serverNeedsReid } from './navidromeVersion';
+import { navidromeReidVerdict, type ReidVerdict } from './navidromeVersion';
 
 const MARKER_KEY = 'substreamer-navidrome-reid';
 
@@ -68,18 +68,23 @@ export function isReidComplete(): boolean {
 }
 
 /**
- * Does the re-key still need to run?
+ * What should happen about the re-key on this launch?
  *
- * True when the server is a Navidrome at 0.64.0 or later — or a Navidrome whose version
- * we cannot parse, which fails OPEN deliberately — and the pass has not completed.
+ * `run` unattended, `skip` entirely, or `ask` the user because the server's version string
+ * cannot settle it (see `navidromeReidVerdict`). Always `skip` once the pass has completed.
  *
- * Synchronous and cheap: one KV read plus a string compare. Safe to call on every launch
- * and from the headless path.
+ * Synchronous and cheap — one KV read plus a string compare — so it is safe on every
+ * launch and on the headless path.
  */
-export function isReidRequired(): boolean {
-  if (isReidComplete()) return false;
+export function reidVerdict(): ReidVerdict {
+  if (isReidComplete()) return 'skip';
   const { serverType, serverVersion } = serverInfoStore.getState();
-  return serverNeedsReid(serverType, serverVersion);
+  return navidromeReidVerdict(serverType, serverVersion);
+}
+
+/** Will the pass run without asking? */
+export function isReidRequired(): boolean {
+  return reidVerdict() === 'run';
 }
 
 /**
@@ -93,5 +98,7 @@ export function isReidRequired(): boolean {
  * blank browse tree and a corrupted download set.
  */
 export function shouldBlockContent(): boolean {
-  return isReidRequired();
+  // `ask` blocks too. An undecided server is one we may be about to re-key, and serving
+  // a car head unit ids we are unsure about is the case this exists to prevent.
+  return reidVerdict() !== 'skip';
 }

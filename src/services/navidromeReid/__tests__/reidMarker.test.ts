@@ -18,6 +18,7 @@ import {
   clearReidMarker,
   isReidComplete,
   isReidRequired,
+  reidVerdict,
   setReidState,
   shouldBlockContent,
 } from '../reidMarker';
@@ -54,19 +55,34 @@ describe('reidMarker', () => {
     expect(isReidRequired()).toBe(false);
   });
 
-  it('does NOT fire on an undecidable Navidrome version', () => {
-    // Fails closed: running against a pre-0.64 server would re-key local data to ids it
-    // never issued. See navidromeVersion.ts.
+  it('runs unattended on a development build', () => {
     mockServerVersion = 'dev';
-    expect(isReidRequired()).toBe(false);
+    expect(reidVerdict()).toBe('run');
+    expect(isReidRequired()).toBe(true);
+  });
+
+  it('asks rather than guessing on an ambiguous snapshot', () => {
     mockServerVersion = '0.0.0-SNAPSHOT (deadbee)';
+    expect(reidVerdict()).toBe('ask');
     expect(isReidRequired()).toBe(false);
+  });
+
+  it('skips everything once complete, even an ambiguous version', () => {
+    mockServerVersion = '0.0.0-SNAPSHOT (deadbee)';
+    setReidState('complete');
+    expect(reidVerdict()).toBe('skip');
   });
 
   it('treats an unreadable marker as not done', () => {
     mockStore.set('substreamer-navidrome-reid', '{not json');
     expect(isReidComplete()).toBe(false);
     expect(isReidRequired()).toBe(true);
+  });
+
+  it('blocks headless content while undecided, not just while required', () => {
+    mockServerVersion = '0.0.0-SNAPSHOT (deadbee)';
+    expect(isReidRequired()).toBe(false);
+    expect(shouldBlockContent()).toBe(true);
   });
 
   it('treats an unknown marker value as not done', () => {

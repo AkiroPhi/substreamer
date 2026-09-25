@@ -13,7 +13,7 @@
 
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../hooks/useTheme';
@@ -33,6 +33,7 @@ function MigrationGateInner(): React.ReactElement | null {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const visible = migrationGateStore((s) => s.visible);
+  const mode = migrationGateStore((s) => s.mode);
   const activeStage = migrationGateStore((s) => s.activeStage);
   const stages = migrationGateStore((s) => s.stages);
   const failed = migrationGateStore((s) => s.failed);
@@ -40,6 +41,52 @@ function MigrationGateInner(): React.ReactElement | null {
   if (!visible) return null;
 
   const activeIndex = STAGE_LABELS.findIndex((s) => s.id === activeStage);
+
+  // The server's version string cannot always say whether it has been migrated — a
+  // development build, or a snapshot whose tag predates 0.64.0. Guessing is not safe in
+  // either direction, so the person who knows decides.
+  if (mode === 'asking') {
+    return (
+      <View
+        style={[
+          styles.root,
+          {
+            backgroundColor: colors.background,
+            paddingTop: insets.top + 24,
+            paddingBottom: insets.bottom + 24,
+          },
+        ]}
+      >
+        <View style={styles.content}>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>
+            {t('migrationAskTitle')}
+          </Text>
+          <Text style={[styles.body, { color: colors.textSecondary }]}>
+            {t('migrationAskBody')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => migrationGateStore.getState().confirm()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+            ]}
+          >
+            <Text style={styles.primaryButtonLabel}>{t('migrationAskConfirm')}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => migrationGateStore.getState().hide()}
+            style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={[styles.secondaryButtonLabel, { color: colors.textSecondary }]}>
+              {t('migrationAskDefer')}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -131,6 +178,15 @@ const styles = StyleSheet.create({
   stageLabel: { fontSize: 15, flexShrink: 1 },
   error: { fontSize: 14, lineHeight: 20 },
   footnote: { fontSize: 13, lineHeight: 18, marginTop: 4 },
+  primaryButton: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  primaryButtonLabel: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  secondaryButton: { paddingVertical: 12, alignItems: 'center' },
+  secondaryButtonLabel: { fontSize: 15 },
 });
 
 export const MigrationGate = memo(MigrationGateInner);

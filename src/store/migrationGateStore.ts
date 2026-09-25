@@ -27,9 +27,17 @@ export interface MigrationStage {
   done?: number;
 }
 
+/**
+ * `working` — the pass is running; the screen reports progress and cannot be dismissed.
+ * `asking` — the server's version cannot settle whether the re-key is needed, so the user
+ *   decides. They know whether they have updated their server; we do not.
+ */
+export type MigrationGateMode = 'working' | 'asking';
+
 interface MigrationGateState {
   /** True while the app must stay behind the screen. */
   visible: boolean;
+  mode: MigrationGateMode;
   /** The stage currently running, or null before the first one starts. */
   activeStage: MigrationStageId | null;
   /** Per-stage progress, keyed by stage id. */
@@ -37,8 +45,10 @@ interface MigrationGateState {
   /** Set when the run failed; the screen surfaces a retry rather than hanging. */
   failed: boolean;
 
-  show: () => void;
+  show: (mode?: MigrationGateMode) => void;
   hide: () => void;
+  /** The user confirmed from `asking`; the caller starts the pass. */
+  confirm: () => void;
   beginStage: (id: MigrationStageId, total?: number) => void;
   advanceStage: (id: MigrationStageId, done: number) => void;
   fail: () => void;
@@ -47,6 +57,7 @@ interface MigrationGateState {
 
 const initial = {
   visible: false,
+  mode: 'working' as MigrationGateMode,
   activeStage: null as MigrationStageId | null,
   stages: {} as Partial<Record<MigrationStageId, MigrationStage>>,
   failed: false,
@@ -55,8 +66,9 @@ const initial = {
 export const migrationGateStore = create<MigrationGateState>()((set) => ({
   ...initial,
 
-  show: () => set({ visible: true, failed: false }),
+  show: (mode = 'working') => set({ visible: true, mode, failed: false }),
   hide: () => set({ visible: false }),
+  confirm: () => set({ mode: 'working' }),
 
   beginStage: (id, total) =>
     set((s) => ({

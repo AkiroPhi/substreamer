@@ -1118,5 +1118,9 @@
   "migrationStageUpdatingDownloads": "Updating downloads",
   "migrationStageMovingFiles": "Moving files",
   "migrationStageRefreshingArtwork": "Refreshing artwork",
-  "migrationStageFinishing": "Finishing up"
+  "migrationStageFinishing": "Finishing up",
+  "migrationAskTitle": "Has your Navidrome server been updated?",
+  "migrationAskBody": "Navidrome 0.64 changed how it identifies tracks. Substreamer can't tell which version your server is running, so it needs you to confirm. If your server is on 0.64 or newer, run the update now. If not, close this and open Substreamer again after you update your server.",
+  "migrationAskConfirm": "My server is updated — run it now",
+  "migrationAskDefer": "Not yet — remind me later"
 }
