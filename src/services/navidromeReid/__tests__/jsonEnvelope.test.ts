@@ -29,13 +29,20 @@ describe('remapJsonEnvelope', () => {
       id: 'oldsong',
       artists: [{ id: 'oldartist', name: 'A' }],
       albumArtists: [{ id: 'oldartist', name: 'A' }],
-      contributors: [{ artistId: 'oldartist', role: 'composer' }],
+      // The real wire shape: Contributor is { role, artist: ArtistID3 }, so the id is
+      // reached by recursion rather than by an allowlisted key at this level.
+      contributors: [{ role: 'composer', artist: { id: 'oldartist', name: 'A' } }],
     })).toEqual({
       id: 'NEWSONG',
       artists: [{ id: 'NEWARTIST', name: 'A' }],
       albumArtists: [{ id: 'NEWARTIST', name: 'A' }],
-      contributors: [{ artistId: 'NEWARTIST', role: 'composer' }],
+      contributors: [{ role: 'composer', artist: { id: 'NEWARTIST', name: 'A' } }],
     });
+  });
+
+  it('rewrites a coverArt nested inside an artist entry', () => {
+    expect(round({ artists: [{ id: 'oldartist', coverArt: 'ar-oldartist_ff' }] }))
+      .toEqual({ artists: [{ id: 'NEWARTIST', coverArt: 'ar-NEWARTIST_ff' }] });
   });
 
   it('NEVER rewrites a MusicBrainz id, even though it is a mappable shape', () => {

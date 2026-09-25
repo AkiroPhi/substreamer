@@ -27,6 +27,15 @@
 const FIRST_DASH = /^([^-]+)-(.+)$/;
 
 /**
+ * The kinds Navidrome emits (`reference/navidrome/model/artwork_id.go:26-31`).
+ * `ParseArtworkID` rejects anything else (`:81-84`), and so must we — otherwise a bare
+ * legacy UUID stored in a cover-art column parses as prefix `f47ac10b` plus id
+ * `58cc-4372-…`, which matches nothing and leaves the value stale forever, since the
+ * plain-column pass deliberately skips artwork columns.
+ */
+const KINDS: ReadonlySet<string> = new Set(['al', 'ar', 'mf', 'pl', 'dc', 'ra']);
+
+/**
  * Rewrite the id inside an artwork token, leaving the prefix, disc index and content hash
  * exactly as they were.
  *
@@ -41,7 +50,12 @@ export function remapArtworkToken(
   if (!token) return token;
 
   const parts = FIRST_DASH.exec(token);
-  if (parts === null) return token;
+  // No prefix, or one Navidrome would not emit: treat the whole value as an id. That
+  // covers a bare uuid or hash sitting in a cover-art column, which would otherwise be
+  // mis-split and never re-keyed.
+  if (parts === null || !KINDS.has(parts[1])) {
+    return lookup(token) ?? token;
+  }
   const [, prefix, remainder] = parts;
 
   // The id runs to the first `_` (content hash) or `:` (disc index), whichever comes

@@ -151,6 +151,27 @@ export async function rekeyPlainColumns(db: InternalDb): Promise<void> {
  */
 export async function deleteSupersededRows(db: InternalDb): Promise<number> {
   let removed = 0;
+
+  // Clear stranded link rows FIRST. `cached_item_songs` has UNIQUE(item_id, song_id), so
+  // an item holding both the old and the new id for one song — edges (I, 1, old) and
+  // (I, 2, new) where old maps to new — makes `UPDATE OR IGNORE` skip the first edge. It
+  // is then still pointing at a `cached_songs` row we are about to delete, and that FK is
+  // the DDL's only ON DELETE no action, so the delete below would throw at COMMIT.
+  // The surviving edge already carries the canonical id, so the stranded one is redundant.
+  await db.runAtomicBatchAsync([
+    ['PRAGMA defer_foreign_keys = ON', []],
+    [
+      'DELETE FROM cached_item_songs '
+      + `WHERE song_id IN (SELECT old_id FROM ${ID_MAP_TABLE}) `
+      + 'AND EXISTS ('
+      + '  SELECT 1 FROM cached_item_songs peer '
+      + '  WHERE peer.item_id = cached_item_songs.item_id '
+      + `  AND peer.song_id = (SELECT new_id FROM ${ID_MAP_TABLE} `
+      + '                      WHERE old_id = cached_item_songs.song_id))',
+      [],
+    ],
+  ] as BatchCommand[]);
+
   for (const [table, key] of [['cached_songs', 'song_id'], ['cached_items', 'item_id']] as const) {
     // eslint-disable-next-line no-await-in-loop
     const row = await db.getFirstAsync<{ n: number }>(

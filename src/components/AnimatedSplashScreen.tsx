@@ -27,6 +27,7 @@ import {
   runMigrations,
 } from '../services/migrationService';
 import { rehydrateAllStores } from '../store/persistence/rehydrate';
+import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
 // Synchronous adapter: the splash reads `completedVersion` before the store
 // has hydrated, so it must be a synchronous SQLite read.
@@ -148,6 +149,10 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // `onStartup()` — that is the authoritative ordering gate against
           // the "full library resync" banner.
           void rehydrateAllStores();
+          // The chain has finished, which is the only moment the re-key can trust the
+          // schema. Deliberately NOT keyed off the splash finishing: the safety timeout
+          // fires that unconditionally, mid-migration on any large library.
+          void runNavidromeReidIfNeeded();
           setMigrationPhase('done');
         })
         .catch((e) => {
@@ -222,6 +227,10 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
       // the `_layout` effect independently awaits hydration before
       // `onStartup()`.
       void rehydrateAllStores();
+      // Nothing pending still means the chain is complete, and this is the common launch
+      // — a re-key triggered by the user's SERVER changing, not by our schema, has to be
+      // reachable here too.
+      void runNavidromeReidIfNeeded();
       fadeOut();
       return;
     }

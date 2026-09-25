@@ -43,6 +43,14 @@ describe('remapArtworkToken', () => {
     expect(remap('dc-untouched:3_ff00')).toBe('dc-untouched:3_ff00');
   });
 
+  it('treats an unknown prefix as a bare id, not as a token', () => {
+    // A bare legacy uuid in a cover-art column would otherwise split as prefix
+    // `f47ac10b` + id `58cc-…` and never match, leaving it stale forever.
+    expect(remap('f47ac10b-58cc-4372-a567-0e02b2c3d479')).toBe('7rke2SAWaicSeSYzkhww6R');
+    expect(remap('oldsong')).toBe('NEWSONG');
+    expect(remap('zz-oldsong')).toBe('zz-oldsong');
+  });
+
   it('passes through anything that is not a token', () => {
     expect(remap('')).toBe('');
     expect(remap(null)).toBeNull();

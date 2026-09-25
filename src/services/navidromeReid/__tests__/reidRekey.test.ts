@@ -173,6 +173,36 @@ describe('duplicate policy — existing row wins', () => {
     const rows = await db.getAllAsync<{ song_id: string }>('SELECT song_id FROM cached_songs');
     expect(rows.map((r) => r.song_id)).toEqual([canonical]);
   });
+  it('survives an item holding both the old and the new id for one song', async () => {
+    const legacy = hex('8888');
+    await seedSong(legacy, hex('9999'));
+    await buildIdMap(db);
+    const canonical = (await loadIdMap(db)).get(legacy) as string;
+    await seedSong(canonical, hex('9999'));
+
+    await db.runAsync(
+      "INSERT INTO cached_items (item_id, type, name, expected_song_count, last_sync_at, "
+      + "downloaded_at) VALUES ('itm', 'playlist', 'P', 2, 0, 0)",
+    );
+    // UNIQUE(item_id, song_id): the update cannot move edge 1 onto edge 2's key.
+    await db.runAsync(
+      'INSERT INTO cached_item_songs (item_id, position, song_id) VALUES (?, 1, ?)',
+      ['itm', legacy],
+    );
+    await db.runAsync(
+      'INSERT INTO cached_item_songs (item_id, position, song_id) VALUES (?, 2, ?)',
+      ['itm', canonical],
+    );
+
+    await rekeyPlainColumns(db);
+    await expect(deleteSupersededRows(db)).resolves.toBeGreaterThanOrEqual(1);
+
+    const links = await db.getAllAsync<{ song_id: string }>(
+      'SELECT song_id FROM cached_item_songs',
+    );
+    expect(links.map((l) => l.song_id)).toEqual([canonical]);
+    expect(await db.getAllAsync('PRAGMA foreign_key_check;')).toEqual([]);
+  });
 });
 
 describe('rekeyEmbeddedIds', () => {

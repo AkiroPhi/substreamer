@@ -83,8 +83,8 @@ import { albumCoverArtById, resolveSongCoverArt } from '../hooks/useSongCoverArt
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const CACHE_DIR_NAME = 'music-cache';
-const UNKNOWN_ALBUM_ID = '_unknown';
+export const CACHE_DIR_NAME = 'music-cache';
+export const UNKNOWN_ALBUM_ID = '_unknown';
 
 /**
  * Hook invoked when an album is enqueued for download and the library cache
@@ -387,6 +387,24 @@ function flushTrackMapsReadyWaiters(): void {
  */
 export function waitForTrackMapsReady(): Promise<void> {
   return ensureTrackMapsReady();
+}
+
+/**
+ * Force the in-memory track maps to be rebuilt from the store, ignoring the ready latch.
+ *
+ * `ensureTrackMapsReady` short-circuits once `trackMapsReady` is true, so a caller that
+ * has changed every song id underneath the maps cannot get them refreshed through it —
+ * and simply clearing the maps is worse, because the latch stays true and every
+ * downloaded track then reads as unavailable for the rest of the session.
+ *
+ * Written for the Navidrome id re-key, which rewrites `cached_songs.song_id` wholesale.
+ * Note the populate ends with a starred-songs sync, so callers must be behind the
+ * delete guard.
+ */
+export async function rebuildTrackMaps(): Promise<void> {
+  trackMapsReady = false;
+  populatePromise = null;
+  await ensureTrackMapsReady();
 }
 
 /**
