@@ -1,4 +1,8 @@
 import { md5 } from "./md5";
+
+// Re-exported for the Navidrome canonical-id transform, which needs the same
+// synchronous MD5 the auth path uses. expo-crypto only offers it asynchronously.
+export { md5 };
 import { arrayBufferToBase64 } from "./utils";
 
 import type { AlbumInfo, AlbumList, AlbumList2, AlbumWithSongsID3, ArtistInfo, ArtistInfo2, ArtistWithAlbumsID3, ArtistsID3, Bookmarks, ChatMessages, Child, ClientInfo, Directory, Genres, Indexes, InternetRadioStations, JukeboxPlaylist, JukeboxStatus, License, Lyrics, LyricsList, MusicFolders, NewestPodcasts, NowPlaying, OpenSubsonicExtensions, PlayQueue, PlayQueueByIndex, Playlist, PlaylistWithSongs, Playlists, PodcastEpisode, Podcasts, ScanStatus, SearchResult2, SearchResult3, Shares, SimilarSongs, SimilarSongs2, Songs, Starred, Starred2, TokenInfo, TopSongs, TranscodeDecision, User, Users, VideoInfo, Videos } from "./types";
