@@ -18,6 +18,8 @@ import {
   JSON_COLUMNS,
   NEVER_REKEY,
   REID_COLUMNS,
+  SONG_ITEM_PREFIX,
+  SONG_PREFIXED_COLUMNS,
   type ClusterMember,
 } from './reidColumns';
 import { ID_MAP_TABLE } from './reidMap';
@@ -114,7 +116,7 @@ function plainColumnCommands(member: ClusterMember): BatchCommand[] {
   const scoped = only === undefined
     ? (REID_COLUMNS[table] ?? [])
     : (REID_COLUMNS[table] ?? []).filter((c) => only.includes(c));
-  return scoped
+  const commands = scoped
     .filter((c) => !artwork.has(c) && !(`${table}.${c}` in NEVER_REKEY))
     .map((column) => [
       `UPDATE OR IGNORE "${table}" SET "${column}" = `
@@ -122,6 +124,23 @@ function plainColumnCommands(member: ClusterMember): BatchCommand[] {
       + `WHERE "${column}" IN (SELECT old_id FROM ${ID_MAP_TABLE})`,
       [],
     ] as BatchCommand);
+
+  // A single-song download keys its item as `song:<songId>`, so the statement above
+  // cannot see the id inside it. Re-emit the prefix around the mapped id. `substr` is
+  // 1-based, hence prefix length + 1.
+  const offset = SONG_ITEM_PREFIX.length + 1;
+  for (const column of SONG_PREFIXED_COLUMNS[table] ?? []) {
+    if (only !== undefined && !only.includes(column)) continue;
+    commands.push([
+      `UPDATE OR IGNORE "${table}" SET "${column}" = '${SONG_ITEM_PREFIX}' || `
+      + `(SELECT new_id FROM ${ID_MAP_TABLE} `
+      + `  WHERE old_id = substr("${table}"."${column}", ${offset})) `
+      + `WHERE "${column}" LIKE '${SONG_ITEM_PREFIX}%' `
+      + `AND substr("${column}", ${offset}) IN (SELECT old_id FROM ${ID_MAP_TABLE})`,
+      [],
+    ] as BatchCommand);
+  }
+  return commands;
 }
 
 /**

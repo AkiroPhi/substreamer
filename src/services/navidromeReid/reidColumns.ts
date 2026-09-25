@@ -164,6 +164,25 @@ export const FK_CLUSTERS: readonly (readonly ClusterMember[])[] = [
   [{ table: 'scrobble_exclusions' }],
 ];
 
+/**
+ * Columns whose value is `song:<songId>` rather than a bare id.
+ *
+ * A single-song download gets a synthetic item id of `song:${song.id}`
+ * (`src/services/musicCacheService.ts:969`), so the plain `WHERE col IN (SELECT old_id …)`
+ * never matches and the embedded id would stay retired — leaving the row keyed on
+ * something `songItemId(newId)` can no longer find, so the UI stops recognising the
+ * download even though its file moved.
+ *
+ * Found by running against a real simulator fixture; no test had one.
+ */
+export const SONG_PREFIXED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  cached_items: ['item_id'],
+  cached_item_songs: ['item_id'],
+};
+
+/** The prefix those columns carry. */
+export const SONG_ITEM_PREFIX = 'song:';
+
 /** Columns whose value EMBEDS an id inside an artwork token rather than being one. */
 export const ARTWORK_TOKEN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   cached_songs: ['cover_art'],

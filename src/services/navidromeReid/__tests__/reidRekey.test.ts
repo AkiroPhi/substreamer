@@ -236,6 +236,54 @@ describe('duplicate policy — existing row wins', () => {
   });
 });
 
+describe('single-song downloads (song:<id> item keys)', () => {
+  it('re-keys the id embedded in the item key', async () => {
+    // A real simulator fixture had `song:52d1c0c9…` as a cached_items.item_id. The plain
+    // `WHERE item_id IN (old_ids)` cannot see an id behind a prefix, so it stayed retired
+    // and songItemId(newId) could no longer find the download.
+    const song = hex('dead');
+    await seedSong(song, hex('beef'));
+    await buildIdMap(db);
+    const canonical = (await loadIdMap(db)).get(song) as string;
+
+    await db.runAsync(
+      "INSERT INTO cached_items (item_id, type, name, expected_song_count, last_sync_at, "
+      + "downloaded_at) VALUES (?, 'song', 'S', 1, 0, 0)",
+      [`song:${song}`],
+    );
+    await db.runAsync(
+      'INSERT INTO cached_item_songs (item_id, position, song_id) VALUES (?, 1, ?)',
+      [`song:${song}`, song],
+    );
+
+    await rekeyPlainColumns(db);
+
+    const item = await db.getFirstAsync<{ item_id: string }>(
+      "SELECT item_id FROM cached_items WHERE type = 'song'",
+    );
+    expect(item?.item_id).toBe(`song:${canonical}`);
+    // The FK child followed it, so the edge still resolves.
+    const edge = await db.getFirstAsync<{ item_id: string; song_id: string }>(
+      'SELECT item_id, song_id FROM cached_item_songs',
+    );
+    expect(edge?.item_id).toBe(`song:${canonical}`);
+    expect(edge?.song_id).toBe(canonical);
+    expect(await db.getAllAsync('PRAGMA foreign_key_check;')).toEqual([]);
+  });
+
+  it('leaves a prefixed key whose id did not move', async () => {
+    await seedSong('5cLJPkLA5DK2BADhoeotPk', '7rke2SAWaicSeSYzkhww6R');
+    await db.runAsync(
+      "INSERT INTO cached_items (item_id, type, name, expected_song_count, last_sync_at, "
+      + "downloaded_at) VALUES ('song:5cLJPkLA5DK2BADhoeotPk', 'song', 'S', 1, 0, 0)",
+    );
+    await buildIdMap(db);
+    await rekeyPlainColumns(db);
+    const item = await db.getFirstAsync<{ item_id: string }>('SELECT item_id FROM cached_items');
+    expect(item?.item_id).toBe('song:5cLJPkLA5DK2BADhoeotPk');
+  });
+});
+
 describe('rekeyEmbeddedIds', () => {
   it('rewrites artwork tokens and JSON envelopes', async () => {
     const song = hex('3333');
