@@ -203,6 +203,37 @@ describe('duplicate policy — existing row wins', () => {
     expect(links.map((l) => l.song_id)).toEqual([canonical]);
     expect(await db.getAllAsync('PRAGMA foreign_key_check;')).toEqual([]);
   });
+  it('clears link rows stranded by an item_id collision', async () => {
+    // PK is (item_id, position): an album downloaded under both the old and the canonical
+    // id keeps whichever positions already existed under the canonical one, and the rest
+    // strand pointing at a cached_songs row the delete is about to remove.
+    const legacyItem = hex('abcd');
+    await buildIdMap(db); // empty so far
+    const song = hex('ef01');
+    await seedSong(song, legacyItem);
+    await buildIdMap(db);
+    const map = await loadIdMap(db);
+    const canonicalItem = map.get(legacyItem) as string;
+
+    for (const id of [legacyItem, canonicalItem]) {
+      await db.runAsync(
+        "INSERT INTO cached_items (item_id, type, name, expected_song_count, last_sync_at, "
+        + "downloaded_at) VALUES (?, 'album', 'A', 1, 0, 0)",
+        [id],
+      );
+      await db.runAsync(
+        'INSERT INTO cached_item_songs (item_id, position, song_id) VALUES (?, 1, ?)',
+        [id, song],
+      );
+    }
+
+    await rekeyPlainColumns(db);
+    await expect(deleteSupersededRows(db)).resolves.toBeGreaterThanOrEqual(1);
+    expect(await db.getAllAsync('PRAGMA foreign_key_check;')).toEqual([]);
+
+    const items = await db.getAllAsync<{ item_id: string }>('SELECT item_id FROM cached_items');
+    expect(items.map((i) => i.item_id)).toEqual([canonicalItem]);
+  });
 });
 
 describe('rekeyEmbeddedIds', () => {

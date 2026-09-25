@@ -72,9 +72,9 @@ async function rekeyRatings(): Promise<void> {
  * Re-key the sync bookkeeping, and clear the cursors.
  *
  * `notFoundAlbumIds` and `lastKnownNewestAlbumId` are entity ids and move like any other.
- * The cursors do NOT move: base62 re-encoding reorders ids arbitrarily, so a keyset cursor
- * into the old ordering points somewhere meaningless in the new one. Clearing them makes
- * the next sync start from the beginning, which is what an affected install wants anyway.
+ * The cursors are left to `discardLibrary`, which resets them through the store's own
+ * `resetLibrarySync` / `resetSongSync` — they are numbers with completion flags attached,
+ * and hand-clearing half of that set is what left the sync believing it was done.
  */
 async function rekeySyncStatus(): Promise<void> {
   const blob = await readBlob(SYNC_STATUS_KEY);
@@ -89,9 +89,11 @@ async function rekeySyncStatus(): Promise<void> {
   if (typeof state.lastKnownNewestAlbumId === 'string') {
     state.lastKnownNewestAlbumId = moved(state.lastKnownNewestAlbumId) ?? state.lastKnownNewestAlbumId;
   }
-  state.librarySyncCursor = null;
-  state.songSyncCursor = null;
-
+  // The cursors are NOT touched here. They are typed `number` with an initial 0, so
+  // writing null would rehydrate into arithmetic — and clearing them alone leaves
+  // `librarySyncComplete` / `songSyncComplete` set, which is half of why no resync fires.
+  // `discardLibrary` calls `resetLibrarySync()` / `resetSongSync()`, which clear the
+  // cursors, the flags, the phase and the strategy together.
   await kvStorage.setItem(SYNC_STATUS_KEY, JSON.stringify({ ...blob, state }));
 }
 

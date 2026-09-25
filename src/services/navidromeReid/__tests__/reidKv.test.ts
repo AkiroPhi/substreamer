@@ -48,10 +48,10 @@ describe('rekeyKvBlobs', () => {
 
     expect(state.notFoundAlbumIds).toEqual([CANONICAL, 'unmoved']);
     expect(state.lastKnownNewestAlbumId).toBe(CANONICAL);
-    // Cursors are keyset positions in the OLD id ordering; base62 re-encoding reorders
-    // ids arbitrarily, so resuming from one would skip an arbitrary slice.
-    expect(state.librarySyncCursor).toBeNull();
-    expect(state.songSyncCursor).toBeNull();
+    // Cursors are deliberately untouched here — they are number-typed with completion
+    // flags attached, and discardLibrary resets the whole set through the store.
+    expect(state.librarySyncCursor).toBe('someOldId');
+    expect(state.songSyncCursor).toBe('anotherOldId');
     // Unrelated fields survive.
     expect(state.songSyncComplete).toBe(true);
   });

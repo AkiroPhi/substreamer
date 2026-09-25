@@ -152,6 +152,11 @@ export async function rekeyPlainColumns(db: InternalDb): Promise<void> {
 export async function deleteSupersededRows(db: InternalDb): Promise<number> {
   let removed = 0;
 
+  // Two shapes of stranded link row, both from `UPDATE OR IGNORE` declining to move a
+  // row onto a key that already exists. Left in place, each one still points at a
+  // `cached_songs` row we are about to delete — and that FK is the DDL's only
+  // ON DELETE no action, so the delete would throw at COMMIT.
+  //
   // Clear stranded link rows FIRST. `cached_item_songs` has UNIQUE(item_id, song_id), so
   // an item holding both the old and the new id for one song — edges (I, 1, old) and
   // (I, 2, new) where old maps to new — makes `UPDATE OR IGNORE` skip the first edge. It
@@ -170,9 +175,26 @@ export async function deleteSupersededRows(db: InternalDb): Promise<number> {
       + '                      WHERE old_id = cached_item_songs.song_id))',
       [],
     ],
+    // The other shape: PK is (item_id, position), so an item downloaded under both the old
+    // and the canonical id keeps whichever positions already existed under the canonical
+    // one. The survivors carry the same songs, so the stranded rows are redundant.
+    [
+      'DELETE FROM cached_item_songs '
+      + `WHERE item_id IN (SELECT old_id FROM ${ID_MAP_TABLE})`,
+      [],
+    ],
   ] as BatchCommand[]);
 
-  for (const [table, key] of [['cached_songs', 'song_id'], ['cached_items', 'item_id']] as const) {
+  // `mbid_overrides` and `scrobble_exclusions` have composite PKs on (type, entity_id), so
+  // they can strand too. Nothing cascades from them, so a stranded row is not dangerous —
+  // it is a user-authored correction that has quietly stopped applying, which is worth
+  // removing and counting rather than leaving to rot.
+  for (const [table, key] of [
+    ['cached_songs', 'song_id'],
+    ['cached_items', 'item_id'],
+    ['mbid_overrides', 'entity_id'],
+    ['scrobble_exclusions', 'entity_id'],
+  ] as const) {
     // eslint-disable-next-line no-await-in-loop
     const row = await db.getFirstAsync<{ n: number }>(
       `SELECT COUNT(*) AS n FROM "${table}" WHERE "${key}" IN (SELECT old_id FROM ${ID_MAP_TABLE})`,
