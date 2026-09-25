@@ -80,6 +80,22 @@ describe('buildIdMap', () => {
     expect(await idMapSize(db)).toBe(0);
   });
 
+  it('a surviving map distinguishes "resume" from "nothing to do"', async () => {
+    // The whole reason the map is a real table. After a successful re-key every id is
+    // canonical, so a rebuild finds NO pairs — identical to an unaffected install. If the
+    // orchestrator keyed off pairs alone it would stamp complete and skip the library
+    // discard, the KV re-key, the artwork refresh and the rehydrate.
+    await seedSong(hex('1234'), hex('5678'));
+    const firstPairs = await buildIdMap(db);
+    expect(firstPairs).toBeGreaterThan(0);
+    await rekeyPlainColumns(db);
+
+    // Simulates the next launch after a crash during the file move.
+    const resumedPairs = await buildIdMap(db);
+    expect(resumedPairs).toBe(0);
+    expect(await idMapSize(db)).toBe(firstPairs); // ...but the table still says resume
+  });
+
   it('survives being rebuilt after a partial run', async () => {
     await seedSong(hex('aaaa'), hex('bbbb'));
     const first = await buildIdMap(db);

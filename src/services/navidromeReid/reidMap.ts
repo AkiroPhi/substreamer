@@ -9,9 +9,14 @@
  * reads the already-re-keyed rows and yields nothing, stranding the file move forever.
  *
  * Created imperatively rather than in `src/db/schema.ts`, because `NORMALIZED_DDL` is
- * generated and a hand-added entry there would be overwritten. That also means nothing
- * else knows the table exists, so this module owns dropping it — on success, on logout,
- * and at the start of any run that is not resuming.
+ * generated and a hand-added entry there would be overwritten. That also means nothing else
+ * knows the table exists, so this module owns dropping it — in exactly two places, on
+ * success and on logout.
+ *
+ * NEVER at the start of a run. A surviving table is the resume signal: a pass that re-keyed
+ * the database and then failed moving files leaves every id canonical, so a rebuild finds
+ * no pairs at all. Without the table the orchestrator could not tell that from "nothing to
+ * do", and would stamp complete having skipped everything after the re-key.
  */
 
 import { canonicalId } from './canonicalId';
