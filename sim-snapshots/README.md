@@ -74,7 +74,9 @@ Beyond the counts, two fields earn their place:
 - **`exercises`** — what this fixture can actually prove.
 - **`doesNotExercise`** — what it cannot, stated explicitly. Both current fixtures have
   every cached `album_id` already canonical, so neither covers album *directory* renaming.
-  Without that line written down, a green run reads as broader coverage than it is.
+  Sometimes the honest entry is "and that is fine" — Navidrome moved its default album PID
+  off `album_legacy` years ago, so that path is near-unreachable in the wild. Recording
+  *why* a gap is acceptable stops the next person hunting a fixture that does not exist.
 
 Also record `knownIssues`. One fixture carries a corrupt index that predates any migration
 work; without the note, a failure gets blamed on the code under test.
@@ -85,8 +87,8 @@ Fixtures are valuable in proportion to how *unlike each other* they are. Worth c
 
 - an install from **below the current migration baseline** — the upgrade path with the most
   steps, and the least exercised
-- one **with downloads**, ideally where album ids are legacy too, so directory renaming is
-  covered for the first time
+- one **with downloads** — the only way to reach the file move, which is the single
+  irreversible step
 - one at **library scale** — tens of thousands of rows, to catch anything quadratic
 - one from a **different server** (Gonic, Airsonic, Subsonic), since id shapes and
   capabilities differ
