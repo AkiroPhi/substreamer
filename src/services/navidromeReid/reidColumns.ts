@@ -83,6 +83,20 @@ export const NEVER_REKEY: Readonly<Record<string, string>> = {
   'pending_scrobble_artists.scrobble_id': 'FK to the synthetic scrobble id',
   'pending_scrobble_album_artists.scrobble_id': 'FK to the synthetic scrobble id',
   'pending_scrobble_contributors.scrobble_id': 'FK to the synthetic scrobble id',
+  // The genres/moods children were missed twice: they hold no entity id of their own, so
+  // they have no REID_COLUMNS entry, and the first drift guard only inspected tables that
+  // had one. Their FK still has to be named.
+  'scrobble_genres.scrobble_id': 'FK to the synthetic scrobble id',
+  'scrobble_moods.scrobble_id': 'FK to the synthetic scrobble id',
+  'pending_scrobble_genres.scrobble_id': 'FK to the synthetic scrobble id',
+  'pending_scrobble_moods.scrobble_id': 'FK to the synthetic scrobble id',
+
+  // Not ids at all, but the guard's net is deliberately wide — a false positive costs one
+  // documented line, a false negative costs data.
+  'scrobble_events.day_key': 'a date bucket (YYYY-MM-DD), not an id',
+  'pending_scrobble_events.day_key': 'a date bucket (YYYY-MM-DD), not an id',
+  'cached_songs.raw_json': 'rewritten by the envelope walker, not the plain-column pass',
+  'cached_items.raw_json': 'rewritten by the envelope walker, not the plain-column pass',
 };
 
 /**

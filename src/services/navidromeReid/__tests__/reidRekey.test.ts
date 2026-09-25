@@ -184,7 +184,7 @@ describe('rekeyEmbeddedIds', () => {
     await buildIdMap(db);
     const map = await loadIdMap(db);
     await rekeyPlainColumns(db);
-    await rekeyEmbeddedIds(db, map);
+    await rekeyEmbeddedIds(db);
 
     const row = await db.getFirstAsync<{ cover_art: string; raw_json: string }>(
       'SELECT cover_art, raw_json FROM cached_songs',
@@ -198,11 +198,56 @@ describe('rekeyEmbeddedIds', () => {
     expect(envelope.coverArt).toBe(`al-${newAlbum}_hash`);
   });
 
+  it('rewrites an envelope-only id the map never saw', async () => {
+    // cached_items.raw_json carries artists[]; cached_albums holds only ONE artist_id, so
+    // a featured album artist exists in no plain column and would miss a map-based lookup.
+    const item = hex('5555');
+    const featured = hex('6666');
+    await db.runAsync(
+      "INSERT INTO cached_items (item_id, type, name, expected_song_count, last_sync_at, "
+      + 'downloaded_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [item, 'album', 'A', 0, 0, 0, JSON.stringify({ id: item, artists: [{ id: featured }] })],
+    );
+
+    await buildIdMap(db);
+    expect((await loadIdMap(db)).has(featured)).toBe(false); // not in the map at all
+    await rekeyPlainColumns(db);
+    await rekeyEmbeddedIds(db);
+
+    const row = await db.getFirstAsync<{ raw_json: string }>(
+      'SELECT raw_json FROM cached_items',
+    );
+    const parsed = JSON.parse(row?.raw_json ?? '{}') as { artists: Array<{ id: string }> };
+    expect(parsed.artists[0].id).not.toBe(featured);
+    expect(parsed.artists[0].id).toHaveLength(22);
+  });
+
+  it('rewrites the legacy song_json column when the install still has it', async () => {
+    // Not in schema.ts, so no schema-derived list can see it. Left stale, the backfill
+    // that reads it writes old ids back over the re-keyed history.
+    await db.runAsync('ALTER TABLE scrobble_events ADD COLUMN song_json TEXT');
+    const song = hex('7777');
+    await db.runAsync(
+      "INSERT INTO scrobble_events (id, time, song_json) VALUES ('s1', 0, ?)",
+      [JSON.stringify({ id: song, albumId: song })],
+    );
+
+    await buildIdMap(db);
+    await rekeyEmbeddedIds(db);
+
+    const row = await db.getFirstAsync<{ song_json: string }>(
+      'SELECT song_json FROM scrobble_events',
+    );
+    const parsed = JSON.parse(row?.song_json ?? '{}') as { id: string };
+    expect(parsed.id).not.toBe(song);
+    expect(parsed.id).toHaveLength(22);
+  });
+
   it('reports progress and leaves untouched rows alone', async () => {
     await seedSong('5cLJPkLA5DK2BADhoeotPk', '7rke2SAWaicSeSYzkhww6R');
     await buildIdMap(db);
     const seen: number[] = [];
-    const rewritten = await rekeyEmbeddedIds(db, await loadIdMap(db), (done) => seen.push(done));
+    const rewritten = await rekeyEmbeddedIds(db, (done: number) => seen.push(done));
     expect(rewritten).toBe(0);
     expect(seen.length).toBeGreaterThan(0);
   });

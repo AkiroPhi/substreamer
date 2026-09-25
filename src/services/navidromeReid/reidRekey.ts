@@ -21,12 +21,42 @@ import {
   type ClusterMember,
 } from './reidColumns';
 import { ID_MAP_TABLE } from './reidMap';
+import { canonicalId } from './canonicalId';
 import { remapArtworkToken } from './artworkToken';
 import { remapJsonEnvelope } from './jsonEnvelope';
 import type { BatchCommand, InternalDb } from '../../store/persistence/db';
 
 /** Rows per batch when rewriting JSON envelopes and artwork tokens row by row. */
 const ROW_CHUNK = 250;
+
+/**
+ * Legacy envelope columns that exist ON DISK but not in `src/db/schema.ts`, so no
+ * generated or schema-derived list can see them.
+ *
+ * `runLegacyColumnDropIfNeeded` removes them once its backfill has nothing left to do, and
+ * that drop is idle-staged AFTER this pass — so the population we are repairing is exactly
+ * the population that still has them. Leaving them stale is not cosmetic: the backfill
+ * parses the envelope and writes `song_id`, `album_id`, `artist_id`, `cover_art` and
+ * `parent` back over the re-keyed values, and listening history has no server copy.
+ */
+const LEGACY_JSON_COLUMNS: Readonly<Record<string, string>> = {
+  scrobble_events: 'song_json',
+  pending_scrobble_events: 'song_json',
+};
+
+/** `JSON_COLUMNS` plus any legacy envelope column this install still carries. */
+async function jsonColumnsForThisInstall(
+  db: InternalDb,
+): Promise<Record<string, readonly string[]>> {
+  const out: Record<string, readonly string[]> = { ...JSON_COLUMNS };
+  for (const [table, column] of Object.entries(LEGACY_JSON_COLUMNS)) {
+    // eslint-disable-next-line no-await-in-loop
+    const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info("${table}")`);
+    if (!info.some((c) => c.name === column)) continue;
+    out[table] = [...(out[table] ?? []), column];
+  }
+  return out;
+}
 
 /**
  * Prove the deferred-FK pragma actually works on this build before touching real data.
@@ -148,11 +178,22 @@ export async function deleteSupersededRows(db: InternalDb): Promise<number> {
  */
 export async function rekeyEmbeddedIds(
   db: InternalDb,
-  map: Map<string, string>,
   onProgress?: (done: number, total: number) => void,
 ): Promise<number> {
-  const lookup = (id: string): string | undefined => map.get(id);
-  const tables = new Set([...Object.keys(ARTWORK_TOKEN_COLUMNS), ...Object.keys(JSON_COLUMNS)]);
+  // `canonicalId` directly, NOT the pre-built map. The map is built from the plain
+  // columns, and an envelope can hold ids that exist in no column: `cached_items.raw_json`
+  // carries `artists[]`, but `cached_albums` has only a single `artist_id`, so a featured
+  // album artist appears nowhere else. Rows still on the legacy metadata shape are worse —
+  // until `runLegacyMetadataConversion` promotes them the envelope is the ONLY source of
+  // their artist and album ids, and the promotion would later write the stale values into
+  // the re-keyed columns. The walk is key-allowlisted, so only genuine id fields reach
+  // this, which is the same exposure the plain columns already have.
+  const lookup = (id: string): string | undefined => {
+    const next = canonicalId(id);
+    return next === id ? undefined : next;
+  };
+  const json = await jsonColumnsForThisInstall(db);
+  const tables = new Set([...Object.keys(ARTWORK_TOKEN_COLUMNS), ...Object.keys(json)]);
   let rewritten = 0;
   let seen = 0;
 
@@ -166,8 +207,8 @@ export async function rekeyEmbeddedIds(
 
   for (const table of tables) {
     const artwork = ARTWORK_TOKEN_COLUMNS[table] ?? [];
-    const json = JSON_COLUMNS[table] ?? [];
-    const columns = [...artwork, ...json];
+    const jsonCols = json[table] ?? [];
+    const columns = [...artwork, ...jsonCols];
     if (columns.length === 0) continue;
 
     const select = columns.map((c) => `"${c}"`).join(', ');
@@ -190,7 +231,7 @@ export async function rekeyEmbeddedIds(
           const next = remapArtworkToken(current, lookup);
           if (next !== current) { sets.push(`"${column}" = ?`); values.push(next); }
         }
-        for (const column of json) {
+        for (const column of jsonCols) {
           const current = row[column];
           if (typeof current !== 'string') continue;
           const next = remapJsonEnvelope(current, lookup);

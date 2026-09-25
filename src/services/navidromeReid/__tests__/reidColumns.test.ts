@@ -15,7 +15,13 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import { FK_CLUSTERS, NEVER_REKEY, REID_COLUMNS } from '../reidColumns';
+import {
+  ARTWORK_TOKEN_COLUMNS,
+  FK_CLUSTERS,
+  JSON_COLUMNS,
+  NEVER_REKEY,
+  REID_COLUMNS,
+} from '../reidColumns';
 
 const SCHEMA_PATH = join(__dirname, '../../../db/schema.ts');
 
@@ -42,12 +48,36 @@ function readSchemaTables(): Map<string, string[]> {
  */
 const looksLikeAnId = (col: string): boolean =>
   col === 'id'
-  || col.endsWith('_id')
   || col === 'parent'
-  || col === 'cover_art'
-  || /music_brainz|mbid/.test(col);
+  || /_ids?$|_json$|_key$|_uri$|_url$|token|cover_art|music_brainz|mbid/.test(col);
 
 const schema = readSchemaTables();
+
+/**
+ * The tables in scope, derived INDEPENDENTLY of the answer being checked.
+ *
+ * Taking it from `Object.keys(REID_COLUMNS)` would make the guard circular: a table with
+ * id columns and no entry at all would simply never be inspected. Seven tables are in that
+ * position (`scrobble_genres`, the snapshot genres/moods, `queue_snapshots`), and adding an
+ * id column to any of them would pass silently.
+ */
+const IN_SCOPE: readonly string[] = (() => {
+  const src = readFileSync(join(__dirname, '../../../db/createNormalizedTables.ts'), 'utf8');
+  const block = src.slice(src.indexOf('KEPT_TABLES'), src.indexOf('];', src.indexOf('KEPT_TABLES')));
+  const kept = [...block.matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]);
+  const carveOuts = [
+    'queue_snapshots', 'queue_snapshot_songs', 'queue_snapshot_song_genres',
+    'queue_snapshot_song_artists', 'queue_snapshot_song_album_artists',
+    'queue_snapshot_song_contributors', 'queue_snapshot_song_moods',
+    'mbid_overrides', 'scrobble_exclusions',
+  ];
+  // Documented exclusions: KV, the cleared image cache, the cleared download queue.
+  const excluded = (t: string): boolean =>
+    t === 'storage' || t === 'cached_images' || t === 'image_download_queue'
+    || t.startsWith('download_queue');
+  return [...new Set([...kept, ...carveOuts])].filter((t) => !excluded(t));
+})();
+
 const coveredTables = Object.keys(REID_COLUMNS);
 
 describe('reidColumns drift guard', () => {
@@ -67,12 +97,22 @@ describe('reidColumns drift guard', () => {
     }
   });
 
-  it('classifies every id-bearing column on every covered table', () => {
+  it('inspects every in-scope table, not just the ones already listed', () => {
+    // Guards against the guard: a table with id columns and no REID_COLUMNS entry.
+    const missing = IN_SCOPE
+      .filter((t) => schema.has(t))
+      .filter((t) => (schema.get(t) ?? []).some(looksLikeAnId))
+      .filter((t) => !(t in REID_COLUMNS)
+        && !(schema.get(t) ?? []).every((c) => !looksLikeAnId(c) || `${t}.${c}` in NEVER_REKEY));
+    expect(missing).toEqual([]);
+  });
+
+  it('classifies every id-bearing column on every IN-SCOPE table', () => {
     const unclassified: string[] = [];
-    for (const table of coveredTables) {
+    for (const table of IN_SCOPE.filter((t) => schema.has(t))) {
       for (const column of schema.get(table) ?? []) {
         if (!looksLikeAnId(column)) continue;
-        const isRekeyed = REID_COLUMNS[table].includes(column);
+        const isRekeyed = (REID_COLUMNS[table] ?? []).includes(column);
         const isExcluded = `${table}.${column}` in NEVER_REKEY;
         if (!isRekeyed && !isExcluded) unclassified.push(`${table}.${column}`);
       }
@@ -80,6 +120,37 @@ describe('reidColumns drift guard', () => {
     // A new id column on a covered table lands here. Add it to REID_COLUMNS, or to
     // NEVER_REKEY with the reason it must not be touched.
     expect(unclassified).toEqual([]);
+  });
+
+  it('guards the artwork and JSON column maps too', () => {
+    // Without this, renaming cover_art on a covered table leaves a dead entry here while
+    // REID_COLUMNS is fixed — the column stops being subtracted from the plain-column
+    // updates AND stops being rewritten, so the tokens silently go stale.
+    for (const [table, columns] of Object.entries(ARTWORK_TOKEN_COLUMNS)) {
+      for (const column of columns) {
+        expect({ table, column, present: (schema.get(table) ?? []).includes(column) })
+          .toEqual({ table, column, present: true });
+      }
+    }
+    for (const [table, columns] of Object.entries(JSON_COLUMNS)) {
+      for (const column of columns) {
+        expect({ table, column, present: (schema.get(table) ?? []).includes(column) })
+          .toEqual({ table, column, present: true });
+      }
+    }
+    // And every artwork/envelope column on a covered table must BE in those maps.
+    for (const table of coveredTables) {
+      for (const column of schema.get(table) ?? []) {
+        if (/^cover_art/.test(column)) {
+          expect({ c: `${table}.${column}`, mapped: (ARTWORK_TOKEN_COLUMNS[table] ?? []).includes(column) })
+            .toEqual({ c: `${table}.${column}`, mapped: true });
+        }
+        if (/_json$/.test(column)) {
+          expect({ c: `${table}.${column}`, mapped: (JSON_COLUMNS[table] ?? []).includes(column) })
+            .toEqual({ c: `${table}.${column}`, mapped: true });
+        }
+      }
+    }
   });
 
   it('never re-keys a column it also excludes', () => {
