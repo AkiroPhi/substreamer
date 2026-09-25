@@ -104,6 +104,8 @@ export function canonicalId(value: string): string {
     case 22: {
       // A hash-family id already fits 128 bits and is kept. Only a random id that
       // overflows is remapped, and it is remapped through md5 of the id STRING.
+      // `bits < 0` (a character outside the alphabet) is redundant by construction —
+      // -1 <= 128 already returns — but it is kept to mirror Go's `!ok` branch explicitly.
       const bits = base62BitLength(value);
       if (bits < 0 || bits <= 128) return value;
       const digest = hexToBytes(md5(value));

@@ -5,6 +5,8 @@
  * produces output of the right shape, so testing against ourselves proves nothing.
  */
 
+import { md5 } from 'subsonic-api';
+
 import { canonicalId } from '../canonicalId';
 
 describe('canonicalId — Navidrome vectors', () => {
@@ -71,6 +73,40 @@ describe('canonicalId — invariants', () => {
     // assertion ever passes with '6VHL3Ur4KSS6Supka8cWNK'-style output the alphabet
     // has been swapped.
     expect(canonicalId('e3b7fc2ae9447bbec37a13bf916e3cf6')).toBe('6VHl3uR4kss6sUPKA8Cwnk');
+  });
+
+  // Round-1 review mutation-tested the suite: `bits <= 129` instead of `<= 128` passed
+  // every published vector while producing thousands of wrong ids, because no vector sits
+  // at 129. Simulating legacy 22-char ids puts ~14% of them there, so it is a large slice
+  // of the affected population. Both values generated from the real Go.
+  it('pins both sides of the 128-bit boundary', () => {
+    expect(canonicalId('7N42dgm5tFLK9N8MT7fHC7')).toBe('7N42dgm5tFLK9N8MT7fHC7');
+    expect(canonicalId('7N42dgm5tFLK9N8MT7fHC8')).toBe('4lNKf50OxNrXbwJuGRpSfD');
+  });
+
+  // Narrowing the hex check to lowercase-only also survived the whole suite. Go's
+  // `hex.DecodeString` accepts both cases, so the port must too.
+  it('accepts uppercase hex, like Go', () => {
+    expect(canonicalId('E3B7FC2AE9447BBEC37A13BF916E3CF6')).toBe('6VHl3uR4kss6sUPKA8Cwnk');
+    expect(canonicalId('F47AC10B-58CC-4372-A567-0E02B2C3D479')).toBe('7rke2SAWaicSeSYzkhww6R');
+  });
+
+  // Navidrome's own second invariant: the transform is the identity on every id its
+  // `NewHash` mints. Its exemptions for participants/tags/folder ids rest on this.
+  it('is the identity on every NewHash id', () => {
+    const newHash = (...parts: string[]): string => {
+      const joined = `${parts.join('\u200b')}\u200b`;
+      // NewHash is encode(md5(parts joined by ZWSP, trailing ZWSP)) — id.go:35-41.
+      return canonicalId(md5(joined));
+    };
+    for (const parts of [
+      [''], ['a'], ['The Beatles'], ['genre', 'electronic'],
+      ['/music/Artist/Album', '1'], ['x'.repeat(500)],
+    ]) {
+      const hashed = newHash(...parts);
+      expect(hashed).toHaveLength(22);
+      expect(canonicalId(hashed)).toBe(hashed);
+    }
   });
 
   it('treats a MusicBrainz id like any other uuid — the caller must exclude it', () => {

@@ -54,9 +54,13 @@ describe('reidMarker', () => {
     expect(isReidRequired()).toBe(false);
   });
 
-  it('fires on an unparseable Navidrome version', () => {
+  it('does NOT fire on an undecidable Navidrome version', () => {
+    // Fails closed: running against a pre-0.64 server would re-key local data to ids it
+    // never issued. See navidromeVersion.ts.
     mockServerVersion = 'dev';
-    expect(isReidRequired()).toBe(true);
+    expect(isReidRequired()).toBe(false);
+    mockServerVersion = '0.0.0-SNAPSHOT (deadbee)';
+    expect(isReidRequired()).toBe(false);
   });
 
   it('treats an unreadable marker as not done', () => {
