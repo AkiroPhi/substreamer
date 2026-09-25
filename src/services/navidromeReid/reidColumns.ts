@@ -92,39 +92,62 @@ export const NEVER_REKEY: Readonly<Record<string, string>> = {
  *
  * Only tables whose PRIMARY KEY is re-keyed head a group. A table that merely holds an id
  * in a non-key column has no FK pointing at that column and can go anywhere.
+ *
+ * A table in TWO clusters must name which columns belong to each. `cached_item_songs`
+ * holds an FK to both `cached_songs` and `cached_items`; rewriting both of its columns in
+ * whichever batch runs first orphans one of them, because the other parent has not moved
+ * yet. A test covers exactly this.
  */
-export const FK_CLUSTERS: readonly (readonly string[])[] = [
-  // cached_songs.song_id is the PK; six children reference it, one of which
-  // (cached_item_songs) is the DDL's only ON DELETE no action.
+export interface ClusterMember {
+  table: string;
+  /**
+   * Restrict this batch to these columns. Needed only for a table that belongs to more
+   * than one cluster: rewriting a column whose FK parent is rewritten in a DIFFERENT batch
+   * orphans it at this batch's commit.
+   */
+  only?: readonly string[];
+}
+
+export const FK_CLUSTERS: readonly (readonly ClusterMember[])[] = [
+  // cached_songs.song_id is the PK; six tables hold an FK to it.
   [
-    'cached_songs',
-    'cached_song_genres',
-    'cached_song_moods',
-    'cached_song_artists',
-    'cached_song_album_artists',
-    'cached_song_contributors',
-    'cached_item_songs',
+    { table: 'cached_songs' },
+    { table: 'cached_song_genres' },
+    { table: 'cached_song_moods' },
+    { table: 'cached_song_artists' },
+    { table: 'cached_song_album_artists' },
+    { table: 'cached_song_contributors' },
+    // Only its song_id belongs here — item_id points at cached_items, below.
+    { table: 'cached_item_songs', only: ['song_id'] },
   ],
-  // cached_items.item_id is the PK; three children reference it. cached_item_songs appears
-  // in both clusters because it holds an FK to each — it is written once, in whichever
-  // batch runs first, and the second finds nothing left to change.
-  ['cached_items', 'cached_albums', 'cached_playlists', 'cached_item_songs'],
-  // The remaining tables have no re-keyed primary key, so nothing points at them.
-  ['scrobble_events', 'scrobble_artists', 'scrobble_album_artists', 'scrobble_contributors'],
+  // cached_items.item_id is the PK; three tables hold an FK to it.
   [
-    'pending_scrobble_events',
-    'pending_scrobble_artists',
-    'pending_scrobble_album_artists',
-    'pending_scrobble_contributors',
+    { table: 'cached_items' },
+    { table: 'cached_albums' },
+    { table: 'cached_playlists' },
+    { table: 'cached_item_songs', only: ['item_id'] },
+  ],
+  // The rest have no re-keyed primary key, so nothing points at them.
+  [
+    { table: 'scrobble_events' },
+    { table: 'scrobble_artists' },
+    { table: 'scrobble_album_artists' },
+    { table: 'scrobble_contributors' },
   ],
   [
-    'queue_snapshot_songs',
-    'queue_snapshot_song_artists',
-    'queue_snapshot_song_album_artists',
-    'queue_snapshot_song_contributors',
+    { table: 'pending_scrobble_events' },
+    { table: 'pending_scrobble_artists' },
+    { table: 'pending_scrobble_album_artists' },
+    { table: 'pending_scrobble_contributors' },
   ],
-  ['mbid_overrides'],
-  ['scrobble_exclusions'],
+  [
+    { table: 'queue_snapshot_songs' },
+    { table: 'queue_snapshot_song_artists' },
+    { table: 'queue_snapshot_song_album_artists' },
+    { table: 'queue_snapshot_song_contributors' },
+  ],
+  [{ table: 'mbid_overrides' }],
+  [{ table: 'scrobble_exclusions' }],
 ];
 
 /** Columns whose value EMBEDS an id inside an artwork token rather than being one. */

@@ -103,7 +103,7 @@ describe('reidColumns drift guard', () => {
   it('puts every covered table in exactly one FK cluster, bar the shared child', () => {
     const counts = new Map<string, number>();
     for (const cluster of FK_CLUSTERS) {
-      for (const table of cluster) counts.set(table, (counts.get(table) ?? 0) + 1);
+      for (const { table } of cluster) counts.set(table, (counts.get(table) ?? 0) + 1);
     }
     for (const table of coveredTables) {
       const seen = counts.get(table) ?? 0;
@@ -115,9 +115,28 @@ describe('reidColumns drift guard', () => {
 
   it('names no table in a cluster that it does not also re-key', () => {
     for (const cluster of FK_CLUSTERS) {
-      for (const table of cluster) {
+      for (const { table } of cluster) {
         expect({ table, covered: table in REID_COLUMNS }).toEqual({ table, covered: true });
       }
+    }
+  });
+
+  it('scopes a table that spans two clusters, and covers all its columns exactly once', () => {
+    // Without `only`, whichever batch runs first rewrites BOTH FK columns and orphans the
+    // one whose parent has not moved yet — a real failure the SQL tests caught.
+    const perTable = new Map<string, string[]>();
+    for (const cluster of FK_CLUSTERS) {
+      for (const { table, only } of cluster) {
+        const cols = only ?? REID_COLUMNS[table];
+        perTable.set(table, [...(perTable.get(table) ?? []), ...cols]);
+      }
+    }
+    for (const [table, columns] of perTable) {
+      // No column rewritten twice, and every allowlisted column rewritten once.
+      expect({ table, dupes: columns.length - new Set(columns).size })
+        .toEqual({ table, dupes: 0 });
+      expect({ table, missing: REID_COLUMNS[table].filter((c) => !columns.includes(c)) })
+        .toEqual({ table, missing: [] });
     }
   });
 });
