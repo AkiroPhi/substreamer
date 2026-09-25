@@ -31,9 +31,11 @@ import { migrationGateStore } from '../../store/migrationGateStore';
 import { rebuildTrackMaps } from '../musicCacheService';
 import { rehydrateAllStores } from '../../store/persistence/rehydrate';
 import { ratingStore } from '../../store/ratingStore';
+import { syncStatusStore } from '../../store/syncStatusStore';
 import { getDb } from '../../store/persistence/db';
 import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
+import { rekeyKvBlobs } from './reidKv';
 import { reidVerdict, setReidState } from './reidMarker';
 import {
   deleteSupersededRows,
@@ -126,6 +128,10 @@ async function execute(): Promise<void> {
       `[reid] files: ${files.moved} moved, ${files.missing} missing, ${files.failed} failed`,
     );
 
+    // The KV blobs that survive the migration chain. Done before the stores rehydrate, so
+    // the rehydrate reads the corrected values rather than writing stale ones back.
+    await rekeyKvBlobs();
+
     gate.beginStage('refreshingArtwork');
     await refreshArtwork();
 
@@ -135,8 +141,9 @@ async function execute(): Promise<void> {
     // the store, not SQL — would treat every moved file as an orphan.
     await rehydrateAllStores();
     // `rehydrateAllStores` covers the row-backed stores only; its own header says the
-    // kvStorage-backed ones are not included.
+    // kvStorage-backed ones are not included, and both of these hold re-keyed ids.
     await ratingStore.persist.rehydrate();
+    await syncStatusStore.persist.rehydrate();
     await rebuildTrackMaps();
 
     await dropIdMap(db);

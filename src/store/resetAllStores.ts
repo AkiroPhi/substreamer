@@ -15,6 +15,7 @@ import {
 import { getDb } from './persistence/db';
 import { awaitDbWritesIdle } from '../db/client';
 import { resetNormalizedSchema } from '../db/createNormalizedTables';
+import { dropIdMap } from '../services/navidromeReid/reidMap';
 import { clearPendingScrobbles } from './persistence/pendingScrobbleTable';
 import { clearScrobbles } from './persistence/scrobbleTable';
 import { clearMusicCacheTables } from './musicCacheStore';
@@ -176,6 +177,15 @@ export async function resetAllStores(): Promise<void> {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn('[resetAllStores] normalized schema reset failed:', e);
+    }
+    // The Navidrome re-key's id map is created imperatively, so it is not in the generated
+    // DDL and `resetNormalizedSchema` cannot know about it. Left behind, a mid-pass logout
+    // would leak one server's id pairs into the next server's run.
+    try {
+      await dropIdMap(normDb);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[resetAllStores] id-map drop failed:', e);
     }
   }
   // completedScrobbleStore also persists to a per-row table (`scrobble_events`);
