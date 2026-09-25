@@ -20,6 +20,8 @@ import { serverInfoStore } from '../../store/serverInfoStore';
 import { navidromeReidVerdict, type ReidVerdict } from './navidromeVersion';
 
 const MARKER_KEY = 'substreamer-navidrome-reid';
+/** Set when the user answers the `ask` prompt: they told us their server is updated. */
+const OVERRIDE_KEY = 'substreamer-navidrome-reid-confirmed';
 
 /**
  * `pending` — nothing done, or a run was interrupted before the re-key committed.
@@ -53,10 +55,33 @@ export function setReidState(state: ReidState): void {
   }
 }
 
+/**
+ * Record that the user confirmed their server has been updated.
+ *
+ * The version string could not settle it, so their answer is the only evidence there is.
+ * Persisted, so a kill between the answer and the pass finishing does not lose it.
+ */
+export function setUserConfirmedReid(): void {
+  try {
+    kvStorageSync.setItem(OVERRIDE_KEY, '1');
+  } catch {
+    /* the prompt simply reappears next launch */
+  }
+}
+
+function userConfirmed(): boolean {
+  try {
+    return kvStorageSync.getItem(OVERRIDE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Test-only: forget the marker. */
 export function clearReidMarker(): void {
   try {
     kvStorageSync.removeItem(MARKER_KEY);
+    kvStorageSync.removeItem(OVERRIDE_KEY);
   } catch {
     /* nothing to do */
   }
@@ -79,7 +104,9 @@ export function isReidComplete(): boolean {
 export function reidVerdict(): ReidVerdict {
   if (isReidComplete()) return 'skip';
   const { serverType, serverVersion } = serverInfoStore.getState();
-  return navidromeReidVerdict(serverType, serverVersion);
+  const verdict = navidromeReidVerdict(serverType, serverVersion);
+  // The user has already answered the prompt; do not ask again.
+  return verdict === 'ask' && userConfirmed() ? 'run' : verdict;
 }
 
 /** Will the pass run without asking? */

@@ -28,7 +28,14 @@ const STAGE_LABELS: ReadonlyArray<{ id: MigrationStageId; key: string }> = [
   { id: 'finishing', key: 'migrationStageFinishing' },
 ];
 
-function MigrationGateInner(): React.ReactElement | null {
+interface MigrationGateProps {
+  /** Start the pass after the user confirms their server is updated. */
+  onConfirm?: () => void;
+  /** Re-run after a failure. */
+  onRetry?: () => void;
+}
+
+function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.ReactElement | null {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -66,7 +73,7 @@ function MigrationGateInner(): React.ReactElement | null {
           </Text>
           <Pressable
             accessibilityRole="button"
-            onPress={() => migrationGateStore.getState().confirm()}
+            onPress={() => { onConfirm?.(); }}
             style={({ pressed }) => [
               styles.primaryButton,
               { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
@@ -144,9 +151,34 @@ function MigrationGateInner(): React.ReactElement | null {
         </View>
 
         {failed && (
-          <Text style={[styles.error, { color: colors.red }]}>
-            {t('migrationGateFailed')}
-          </Text>
+          <>
+            <Text style={[styles.error, { color: colors.red }]}>
+              {t('migrationGateFailed')}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => { onRetry?.(); }}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+              ]}
+            >
+              <Text style={styles.primaryButtonLabel}>{t('migrationGateRetry')}</Text>
+            </Pressable>
+            {/* Without this the app is unreachable forever: an unsupported pragma fails
+                identically on every relaunch, and the user's downloads sit on disk behind
+                a wall. The marker stays `pending`, so the headless path is still blocked
+                and the pass retries next launch. */}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => migrationGateStore.getState().hide()}
+              style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Text style={[styles.secondaryButtonLabel, { color: colors.textSecondary }]}>
+                {t('migrationGateContinueAnyway')}
+              </Text>
+            </Pressable>
+          </>
         )}
 
         <Text style={[styles.footnote, { color: colors.textSecondary }]}>

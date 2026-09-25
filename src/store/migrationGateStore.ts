@@ -49,6 +49,8 @@ interface MigrationGateState {
   hide: () => void;
   /** The user confirmed from `asking`; the caller starts the pass. */
   confirm: () => void;
+  /** Clear the failure so a retry can re-run the stages. */
+  clearFailure: () => void;
   beginStage: (id: MigrationStageId, total?: number) => void;
   advanceStage: (id: MigrationStageId, done: number) => void;
   fail: () => void;
@@ -69,6 +71,7 @@ export const migrationGateStore = create<MigrationGateState>()((set) => ({
   show: (mode = 'working') => set({ visible: true, mode, failed: false }),
   hide: () => set({ visible: false }),
   confirm: () => set({ mode: 'working' }),
+  clearFailure: () => set({ failed: false, activeStage: null, stages: {} }),
 
   beginStage: (id, total) =>
     set((s) => ({

@@ -26,7 +26,7 @@ import {
   getPendingTasks,
   runMigrations,
 } from '../services/migrationService';
-import { rehydrateAllStores } from '../store/persistence/rehydrate';
+import { awaitKvHydration, rehydrateAllStores } from '../store/persistence/rehydrate';
 import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
 // Synchronous adapter: the splash reads `completedVersion` before the store
@@ -152,7 +152,11 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // The chain has finished, which is the only moment the re-key can trust the
           // schema. Deliberately NOT keyed off the splash finishing: the safety timeout
           // fires that unconditionally, mid-migration on any large library.
-          void runNavidromeReidIfNeeded();
+          //
+          // The KV hydration is awaited first because the check reads serverInfoStore,
+          // which persists through the ASYNC adapter — an unhydrated read gives
+          // serverType === null, which reads as "not Navidrome" and silently skips.
+          void awaitKvHydration().then(() => runNavidromeReidIfNeeded());
           setMigrationPhase('done');
         })
         .catch((e) => {
@@ -229,8 +233,8 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
       void rehydrateAllStores();
       // Nothing pending still means the chain is complete, and this is the common launch
       // — a re-key triggered by the user's SERVER changing, not by our schema, has to be
-      // reachable here too.
-      void runNavidromeReidIfNeeded();
+      // reachable here too. Awaits KV hydration for the same reason as the other path.
+      void awaitKvHydration().then(() => runNavidromeReidIfNeeded());
       fadeOut();
       return;
     }

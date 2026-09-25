@@ -16,6 +16,7 @@ import { offlineModeStore } from '../store/offlineModeStore';
 import { pendingScrobbleStore } from '../store/pendingScrobbleStore';
 import { scrobbleExclusionStore } from '../store/scrobbleExclusionStore';
 import { applyLocalPlay } from './playStatsService';
+import { shouldBlockContent } from './navidromeReid/reidMarker';
 import { getApi, type Child } from './subsonicService';
 
 /**
@@ -140,6 +141,11 @@ export function addCompletedScrobble(incoming: Child, playlistId?: string): void
  */
 async function processScrobbles(): Promise<void> {
   if (isProcessing) return;
+  // A pending Navidrome re-key means every song id here is one the server has retired.
+  // Submitting anyway does not merely fail: a missing id comes back as HTTP 200 with
+  // error code 70, our wrapper throws only on `!res.ok`, so it reads as SUCCESS and the
+  // row is deleted. Listening history has no server copy.
+  if (shouldBlockContent()) return;
   isProcessing = true;
 
   try {

@@ -36,13 +36,24 @@ import { getDb } from '../../store/persistence/db';
 import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
 import { rekeyKvBlobs } from './reidKv';
-import { reidVerdict, setReidState } from './reidMarker';
+import { discardLibrary } from './reidLibrary';
+import { kvStorage } from '../../store/persistence';
+import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
 import {
   deleteSupersededRows,
   rekeyEmbeddedIds,
   rekeyPlainColumns,
   verifyDeferredForeignKeys,
 } from './reidRekey';
+
+/**
+ * The blob-to-SQL ETL's completion key and the version it stamps
+ * (`dataModelUpgradeService.ts:31-32`). Stamped here because the pass discards the library
+ * the ETL would import into — left unstamped, the idle orchestrator would re-import
+ * retired ids from the surviving legacy blobs straight after the pass finished.
+ */
+const ETL_DONE_KEY = 'substreamer-normalized-migration-complete';
+const ETL_DONE_VALUE = '3';
 
 let inFlight: Promise<void> | null = null;
 
@@ -68,16 +79,39 @@ export function runNavidromeReidIfNeeded(): Promise<void> {
   return inFlight;
 }
 
+/**
+ * The user answered the `ask` prompt: their server is updated, run it.
+ *
+ * Their answer is persisted before the pass starts, so a kill mid-run does not put the
+ * question back — the version string still cannot answer it and asking twice is worse
+ * than remembering.
+ */
+export function confirmAndRunNavidromeReid(): Promise<void> {
+  setUserConfirmedReid();
+  migrationGateStore.getState().confirm();
+  return runNavidromeReidIfNeeded();
+}
+
+/** Re-run after a failure, from the gate's retry button. */
+export function retryNavidromeReid(): Promise<void> {
+  migrationGateStore.getState().clearFailure();
+  return runNavidromeReidIfNeeded();
+}
+
 async function execute(): Promise<void> {
   const gate = migrationGateStore.getState();
+  gate.show('working');
   const db = getDb();
   if (!db) {
-    // No database means nothing to re-key and nothing we could safely stamp.
-    logLibrarySync('[reid] no database — deferring to the next launch');
+    // Show the gate FIRST and fail into it. Returning silently would let the app launch
+    // with the marker still `pending` — and on a resumed run that means rows re-keyed,
+    // files half-moved, and `reconcileMusicCacheAsync` reading the store and deleting
+    // every moved file as an orphan.
+    logLibrarySync('[reid] no database — cannot run');
+    gate.fail();
     return;
   }
 
-  gate.show('working');
   gate.beginStage('preparing');
   setReidState('pending');
 
@@ -90,9 +124,6 @@ async function execute(): Promise<void> {
       gate.fail();
       return;
     }
-
-    await clearLiveQueue(db);
-    await clearDownloadQueue(db);
 
     await createIdMap(db);
     const pairs = await buildIdMap(db);
@@ -108,25 +139,49 @@ async function execute(): Promise<void> {
       return;
     }
 
+    // Only now that we know there IS work. Clearing these above the early exit destroyed
+    // the saved queue and every queued download for anyone already canonical — a fresh
+    // sign-in on 0.64, or anyone who had re-synced.
+    await clearLiveQueue(db);
+    await clearDownloadQueue(db);
+
     gate.beginStage('updatingDownloads');
     await rekeyPlainColumns(db);
     const superseded = await deleteSupersededRows(db);
     await rekeyEmbeddedIds(db, (done, total) => {
-      if (gate.stages.updatingDownloads?.total !== total) {
-        gate.beginStage('updatingDownloads', total);
+      // getState() each time: `gate` is a snapshot taken before any set(), so its
+      // `stages` never changes and the guard below would always fire.
+      const live = migrationGateStore.getState();
+      if (live.stages.updatingDownloads?.total !== total) {
+        live.beginStage('updatingDownloads', total);
       }
-      gate.advanceStage('updatingDownloads', done);
+      live.advanceStage('updatingDownloads', done);
     });
     logLibrarySync(`[reid] database re-keyed (${superseded} superseded rows removed)`);
 
     gate.beginStage('movingFiles');
     const files = await moveDownloadedFiles(db, (done, total) => {
-      if (gate.stages.movingFiles?.total !== total) gate.beginStage('movingFiles', total);
-      gate.advanceStage('movingFiles', done);
+      const live = migrationGateStore.getState();
+      if (live.stages.movingFiles?.total !== total) live.beginStage('movingFiles', total);
+      live.advanceStage('movingFiles', done);
     });
     logLibrarySync(
       `[reid] files: ${files.moved} moved, ${files.missing} missing, ${files.failed} failed`,
     );
+    // A file left at its old path has a row pointing at the new one, so the next
+    // reconcile deletes it as an orphan. The move is idempotent, so failing here and
+    // retrying next launch costs nothing and saves the track.
+    if (files.failed > 0) throw new Error(`${files.failed} file(s) could not be moved`);
+
+    // Discard the library and reset the sync. This has to happen BEFORE the stores
+    // rehydrate and before `rebuildTrackMaps`: the track-map populate ends with a starred
+    // sync that reads `favorite_songs` from SQL, and if those rows still held retired ids
+    // while the store had just been rehydrated to canonical ones, the zero overlap would
+    // tear down the whole starred download.
+    const cleared = await discardLibrary(db);
+    // Nothing will import retired ids from the surviving blobs afterwards.
+    await kvStorage.setItem(ETL_DONE_KEY, ETL_DONE_VALUE);
+    logLibrarySync(`[reid] library discarded (${cleared} tables) — one sync will refill it`);
 
     // The KV blobs that survive the migration chain. Done before the stores rehydrate, so
     // the rehydrate reads the corrected values rather than writing stale ones back.
@@ -139,7 +194,12 @@ async function execute(): Promise<void> {
     // The stores still hold old ids in memory. Until they are rehydrated, any store-driven
     // write puts them straight back into SQL, and `reconcileMusicCacheAsync` — which reads
     // the store, not SQL — would treat every moved file as an orphan.
-    await rehydrateAllStores();
+    const rehydration = await rehydrateAllStores();
+    if (rehydration.failed.some((f) => f.store === 'musicCache')) {
+      // Without it `hasHydrated` stays false, the track maps build empty and never latch,
+      // and every download reads as unavailable — with the marker already stamped.
+      throw new Error('music cache failed to rehydrate');
+    }
     // `rehydrateAllStores` covers the row-backed stores only; its own header says the
     // kvStorage-backed ones are not included, and both of these hold re-keyed ids.
     await ratingStore.persist.rehydrate();

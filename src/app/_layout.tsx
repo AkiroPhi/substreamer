@@ -28,6 +28,10 @@ LogBox.ignoreLogs([
 import { AddToPlaylistSheet } from '../components/AddToPlaylistSheet';
 import { BookmarkNameSheet } from '../components/BookmarkNameSheet';
 import { MigrationGate } from '../components/MigrationGate';
+import {
+  confirmAndRunNavidromeReid,
+  retryNavidromeReid,
+} from '../services/navidromeReid/runNavidromeReid';
 import { RootErrorBoundary } from '../components/RootErrorBoundary';
 import { ThemedAlertHost } from '../components/ThemedAlertHost';
 import { DARK_MIX, GRADIENT_LOCATIONS, GRADIENT_MIX_CURVE, GradientBackground, LIGHT_MIX } from '../components/GradientBackground';
@@ -532,6 +536,14 @@ export default function RootLayout() {
       // queueRestoreStartedRef effect below); its heavy RNTP hydration freezes the
       // splash animation mid-sweep.
       initPlayer();
+
+      // Everything below talks to the server or to tables a migration may be rewriting.
+      // `initPlayer` stays eager on purpose (see above); the rest waits, because
+      // `initScrobbleService` submits pending scrobbles synchronously and deletes them on
+      // what it reads as success — and a retired id comes back as HTTP 200 with error
+      // code 70, which reads as success. That would destroy listening history mid-re-key.
+      if (startupBlocked) return;
+
       initScrobbleService();
       initFailover();
       // (iOS) bring up the streaming proxy for AVPlayer if the active server is
@@ -561,7 +573,7 @@ export default function RootLayout() {
       stopAutoOffline();
       stopMonitoring();
     };
-  }, [rehydrated, isLoggedIn]);
+  }, [rehydrated, isLoggedIn, startupBlocked]);
 
   // --- Deferred persisted-queue restore (after the animated splash) ---
   // The native player is set up eagerly above; only the heavy queue RESTORE + RNTP
@@ -907,7 +919,10 @@ export default function RootLayout() {
       {/* Blocking migration screen. Sits between the splash and the app: while it is up
           `startupBlocked` holds every startup effect, so the migration is not racing
           them. Rendered after the splash so it layers above it during the handover. */}
-      <MigrationGate />
+      <MigrationGate
+        onConfirm={() => { void confirmAndRunNavidromeReid(); }}
+        onRetry={() => { void retryNavidromeReid(); }}
+      />
       </RootErrorBoundary>
       </ThemeProvider>
       </I18nextProvider>
