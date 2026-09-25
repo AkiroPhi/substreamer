@@ -63,6 +63,7 @@ import { syncStatusStore } from '../store/syncStatusStore';
 import { musicCacheStore } from '../store/musicCacheStore';
 import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
 import { awaitKvHydration, rehydrateAllStores } from '../store/persistence/rehydrate';
+import { shouldBlockContent } from './navidromeReid/reidMarker';
 import i18n from '../i18n/i18n';
 import {
   CAR_ROOT_ID,
@@ -595,6 +596,7 @@ async function resolveVoice(request: MediaSearchRequest): Promise<Child[]> {
  * route) through the same resolver + playback path as `onPlayFromSearchRequest`.
  */
 export async function dispatchVoiceSearchRequest(request: MediaSearchRequest): Promise<void> {
+  if (shouldBlockContent()) return;
   const queue = await resolveVoice(request);
   if (queue.length === 0) return;
   await playTrack(queue[0], queue, null);
@@ -646,6 +648,12 @@ async function pushSnapshot(): Promise<void> {
     // attached before this JS process registered its handler on a headless launch).
     // Gating here means no buildSnapshot / setBrowseSnapshot work at all on the
     // phone-only path, and every caller inherits it.
+    // A pending Navidrome id re-key means every id we hold is one the server has
+    // retired. `index.js` loads playerBootstrap before expo-router, so a CarPlay / Siri /
+    // lock-screen cold wake arms this service without rendering `_layout` and without
+    // running the migration chain — the interstitial cannot gate it. Serving those ids
+    // fails anyway; serving nothing until the user opens the app is the honest failure.
+    if (shouldBlockContent()) return;
     if (getTrackPlayer().isCarConnected()) {
       const snapshot = await buildSnapshot();
       getTrackPlayer().setBrowseSnapshot(snapshot);
@@ -663,9 +671,10 @@ async function pushSnapshot(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 const handler: PlaybackServiceHandler = {
-  onBrowseRequest: (parentId) => resolveBrowseChildren(parentId),
-  onSearchRequest: (query) => resolveSearch(query),
+  onBrowseRequest: async (parentId) => (shouldBlockContent() ? [] : resolveBrowseChildren(parentId)),
+  onSearchRequest: async (query) => (shouldBlockContent() ? [] : resolveSearch(query)),
   onPlayFromIdRequest: async (mediaId) => {
+    if (shouldBlockContent()) return [];
     const { queue, startIndex, sourcePlaylistId } = await resolvePlayback(mediaId);
     if (queue.length === 0) return [];
     // Fire-and-forget playTrack (carries app bookkeeping); native steps back and
@@ -675,6 +684,7 @@ const handler: PlaybackServiceHandler = {
     return rnTracks;
   },
   onPlayFromSearchRequest: async (request) => {
+    if (shouldBlockContent()) return [];
     const queue = await resolveVoice(request);
     if (queue.length === 0) return [];
     void playTrack(queue[0], queue, null);
