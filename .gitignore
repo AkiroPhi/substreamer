@@ -50,6 +50,14 @@ yarn-error.*
 # saved plans
 plans/
 
+# Simulator fixture packages. The folder, its README and its scripts are tracked; every
+# snapshot inside it is NOT — they are gigabytes of real listening history and downloaded
+# audio, and none of that belongs in the repo. See sim-snapshots/README.md.
+/sim-snapshots/*
+!/sim-snapshots/README.md
+!/sim-snapshots/restore.sh
+!/sim-snapshots/list.sh
+
 # test coverage
 coverage/
 
