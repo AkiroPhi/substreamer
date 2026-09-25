@@ -360,7 +360,9 @@ export function PlaylistDetailScreen() {
           return;
         }
         if (id in musicCacheStore.getState().cachedItems) {
-          syncCachedPlaylistTracks(id, editedTracks.map((tr) => tr.id));
+          // The user's own edit may legitimately remove every track, so it opts out of
+          // the empty/zero-overlap guard that protects against a suspect server answer.
+          syncCachedPlaylistTracks(id, editedTracks.map((tr) => tr.id), { allowFullClear: true });
         }
       }
 

@@ -1587,6 +1587,66 @@ describe('removeCachedPlaylistTrack', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  syncCachedPlaylistTracks — the destructive-prune guard              */
+/* ------------------------------------------------------------------ */
+
+describe('syncCachedPlaylistTracks prune guard', () => {
+  it('refuses to prune on an empty incoming list', async () => {
+    mockFileExists = true;
+    seedSong(makeCachedSong('s1'));
+    seedSong(makeCachedSong('s2'));
+    seedItem('pl-1', { type: 'playlist', songIds: ['s1', 's2'] });
+
+    await syncCachedPlaylistTracks('pl-1', []);
+
+    expect(musicCacheStore.getState().cachedItems['pl-1'].songIds).toEqual(['s1', 's2']);
+    expect(fileDeletesAsync).toHaveLength(0);
+  });
+
+  it('refuses to prune when the incoming list shares nothing with the cached set', async () => {
+    mockFileExists = true;
+    seedSong(makeCachedSong('old1'));
+    seedSong(makeCachedSong('old2'));
+    seedItem('pl-1', { type: 'playlist', songIds: ['old1', 'old2'] });
+
+    // Every id changed — a server-side id migration, not an edited playlist.
+    await syncCachedPlaylistTracks('pl-1', ['new1', 'new2']);
+
+    expect(musicCacheStore.getState().cachedItems['pl-1'].songIds).toEqual(['old1', 'old2']);
+    expect(fileDeletesAsync).toHaveLength(0);
+  });
+
+  it('prunes normally when the lists overlap', async () => {
+    mockFileExists = true;
+    seedSong(makeCachedSong('s1'));
+    seedSong(makeCachedSong('s2'));
+    seedItem('pl-1', { type: 'playlist', songIds: ['s1', 's2'] });
+
+    await syncCachedPlaylistTracks('pl-1', ['s1']);
+
+    expect(musicCacheStore.getState().cachedItems['pl-1'].songIds).toEqual(['s1']);
+    expect(fileDeletesAsync.some((u) => u.includes('s2'))).toBe(true);
+  });
+
+  it('allows a full clear when the caller opts in', async () => {
+    mockFileExists = true;
+    seedSong(makeCachedSong('s1'));
+    seedItem('pl-1', { type: 'playlist', songIds: ['s1'] });
+
+    await syncCachedPlaylistTracks('pl-1', [], { allowFullClear: true });
+
+    expect(musicCacheStore.getState().cachedItems['pl-1'].songIds).toEqual([]);
+    expect(fileDeletesAsync.some((u) => u.includes('s1'))).toBe(true);
+  });
+
+  it('does not refuse when nothing is cached yet', async () => {
+    seedItem('pl-1', { type: 'playlist', songIds: [] });
+    await syncCachedPlaylistTracks('pl-1', []);
+    expect(musicCacheStore.getState().cachedItems['pl-1'].songIds).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  removeCachedAlbumSong                                              */
 /* ------------------------------------------------------------------ */
 

@@ -58,6 +58,7 @@ import {
   readQueuedSongStatus,
 } from '../store/persistence/musicCacheTables';
 import { logImageCache } from './imageCacheLogger';
+import { logLibrarySync } from './librarySyncLogger';
 import { processingOverlayStore } from '../store/processingOverlayStore';
 import { playbackSettingsStore } from '../store/playbackSettingsStore';
 import { resolveEffectiveFormat } from '../utils/effectiveFormat';
@@ -1895,14 +1896,23 @@ export function reorderCachedPlaylistTracks(
  * Sync a cached playlist's song set to a new ordered list of track ids.
  * Removes songs that are no longer present; reorders remaining songs to
  * match `newTrackIds` order. Orphan files are deleted.
+ *
+ * REFUSES to prune on an incoming list that is empty, or that shares nothing with
+ * what is cached — see {@link pruneWouldBeDestructive}. Pass `allowFullClear` when
+ * the emptiness is the user's own edit rather than a suspect server answer.
  */
 export async function syncCachedPlaylistTracks(
   playlistId: string,
   newTrackIds: string[],
+  opts?: { allowFullClear?: boolean },
 ): Promise<void> {
   const cached = musicCacheStore.getState().cachedItems[playlistId];
   if (!cached) return;
   if (cached.type !== 'playlist' && cached.type !== 'favorites') return;
+
+  if (!opts?.allowFullClear && pruneWouldBeDestructive(playlistId, cached.songIds, newTrackIds)) {
+    return;
+  }
 
   const keepSet = new Set(newTrackIds);
 
@@ -1957,6 +1967,41 @@ export async function syncCachedPlaylistTracks(
  * download pipeline, which adds edges to the existing item under the same itemId
  * and lets `markItemComplete` upsert the row and its fresh edges.
  */
+/**
+ * Would pruning `cached` down to `incoming` destroy downloads on a list we should not
+ * trust? Two shapes say yes, and both are seen in practice:
+ *
+ * - **Empty incoming.** `normalizedLibrarySync` passes `updated.entry ?? []`, so a
+ *   response without an `entry` array reads as "the playlist is empty" rather than
+ *   "no opinion".
+ * - **Zero overlap on a non-empty list.** The cached set and the server's set describe
+ *   the same playlist, so disjoint ids mean the ids themselves moved under us — a
+ *   server-side id migration, not a playlist someone emptied and refilled.
+ *
+ * Refusing costs a stale entry until the next sync. Accepting deletes the audio.
+ * Mirrors `deleteAlbumSongsNotIn`'s self-consistency check (`db/repository/songs.ts`).
+ */
+function pruneWouldBeDestructive(
+  itemId: string,
+  cachedIds: readonly string[],
+  incomingIds: readonly string[],
+): boolean {
+  if (cachedIds.length === 0) return false;
+  if (incomingIds.length === 0) {
+    logLibrarySync(`prune refused: empty incoming list for ${itemId} (${cachedIds.length} cached)`);
+    return true;
+  }
+  const cachedSet = new Set(cachedIds);
+  if (!incomingIds.some((id) => cachedSet.has(id))) {
+    logLibrarySync(
+      `prune refused: zero overlap for ${itemId} ` +
+        `(${cachedIds.length} cached vs ${incomingIds.length} incoming)`,
+    );
+    return true;
+  }
+  return false;
+}
+
 export function syncCachedItemTracks(
   itemId: string,
   newSongs: Child[],
@@ -2278,6 +2323,10 @@ async function syncStarredSongsDownload(): Promise<void> {
   const db = getDb();
   if (!db) return;
   if ((await countStarredSongs(db)) === 0) {
+    // Deliberately NOT guarded like the prune path below: a zero count here is the user
+    // unstarring their last track, and deleting the download is the correct response.
+    // The re-key rewrites `favorite_songs` inside one atomic batch and the interstitial
+    // holds the app while it runs, so the count cannot transit zero mid-pass.
     deleteCachedItem(STARRED_SONGS_ITEM_ID);
     return;
   }
