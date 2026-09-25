@@ -27,6 +27,7 @@ LogBox.ignoreLogs([
 
 import { AddToPlaylistSheet } from '../components/AddToPlaylistSheet';
 import { BookmarkNameSheet } from '../components/BookmarkNameSheet';
+import { MigrationGate } from '../components/MigrationGate';
 import { RootErrorBoundary } from '../components/RootErrorBoundary';
 import { ThemedAlertHost } from '../components/ThemedAlertHost';
 import { DARK_MIX, GRADIENT_LOCATIONS, GRADIENT_MIX_CURVE, GradientBackground, LIGHT_MIX } from '../components/GradientBackground';
@@ -70,6 +71,7 @@ import {
   processImageQueue,
   recoverStalledImageDownloads,
 } from '../services/imageCacheService';
+import { migrationGateStore } from '../store/migrationGateStore';
 import { connectivityStore } from '../store/connectivityStore';
 import { deferredMusicCacheInit, getMusicCacheStats, initMusicCache } from '../services/musicCacheService';
 import { checkStorageLimit } from '../services/storageService';
@@ -317,6 +319,11 @@ const FOREGROUND_REFRESH_THRESHOLD_MS = 10 * 60_000;
 
 export default function RootLayout() {
   const [splashVisible, setSplashVisible] = useState(true);
+  // A blocking one-time migration holds the app the same way the splash does, so the
+  // startup effects gate on the pair rather than on the splash alone. One boolean, read
+  // in three places, instead of a pause flag threaded through the services they call.
+  const migrationGateVisible = migrationGateStore((s) => s.visible);
+  const startupBlocked = splashVisible || migrationGateVisible;
   const rehydrated = authStore((s) => s.rehydrated);
   const isLoggedIn = authStore((s) => s.isLoggedIn);
   const { theme, colors, preference } = useTheme();
@@ -410,11 +417,11 @@ export default function RootLayout() {
     // Hold the expensive deferred startup (image/music cache scans, backup, data-sync,
     // image-queue drain) until the animated splash has finished — its synchronous
     // SQLite/FS work blocks the JS thread and freezes the splash animation.
-    if (!isLoggedIn || splashVisible) return;
+    if (!isLoggedIn || startupBlocked) return;
     let cancelled = false;
     void runDeferredStartup(() => cancelled);
     return () => { cancelled = true; };
-  }, [isLoggedIn, splashVisible]);
+  }, [isLoggedIn, startupBlocked]);
 
   // --- Cover-art recache resumption on connectivity restoration ---
   // The image-cache refresh-queue worker picks up cover art for downloaded items. Kick it
@@ -563,12 +570,12 @@ export default function RootLayout() {
   // migration takes effect instead of being restored over.
   const queueRestoreStartedRef = useRef(false);
   useEffect(() => {
-    if (!rehydrated || !isLoggedIn || splashVisible || queueRestoreStartedRef.current) {
+    if (!rehydrated || !isLoggedIn || startupBlocked || queueRestoreStartedRef.current) {
       return;
     }
     queueRestoreStartedRef.current = true;
     restorePersistedQueueAfterBoot();
-  }, [rehydrated, isLoggedIn, splashVisible]);
+  }, [rehydrated, isLoggedIn, startupBlocked]);
 
   // --- Android: background the app instead of killing it at the root ---
   useEffect(() => {
@@ -896,6 +903,11 @@ export default function RootLayout() {
       {splashVisible && (
         <AnimatedSplashScreen onFinish={handleSplashFinish} />
       )}
+
+      {/* Blocking migration screen. Sits between the splash and the app: while it is up
+          `startupBlocked` holds every startup effect, so the migration is not racing
+          them. Rendered after the splash so it layers above it during the handover. */}
+      <MigrationGate />
       </RootErrorBoundary>
       </ThemeProvider>
       </I18nextProvider>

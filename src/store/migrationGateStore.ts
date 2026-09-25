@@ -1,0 +1,79 @@
+/**
+ * State for the blocking migration screen shown between the splash and the app.
+ *
+ * Deliberately NOT persisted: it describes a run in progress, and a run that did not
+ * finish is re-detected from its own marker on the next launch rather than resumed from
+ * UI state.
+ *
+ * Holding the app behind this screen is also what removes the need for a pause flag
+ * consulted across the codebase — while it is up, `_layout`'s startup effects have not
+ * run, so nothing is racing the work it is reporting on.
+ */
+
+import { create } from 'zustand';
+
+/** A named unit of work the screen reports on, in the order it runs. */
+export type MigrationStageId =
+  | 'preparing'
+  | 'updatingDownloads'
+  | 'movingFiles'
+  | 'refreshingArtwork'
+  | 'finishing';
+
+export interface MigrationStage {
+  id: MigrationStageId;
+  /** Present only for stages with a countable unit of work — the file move, chiefly. */
+  total?: number;
+  done?: number;
+}
+
+interface MigrationGateState {
+  /** True while the app must stay behind the screen. */
+  visible: boolean;
+  /** The stage currently running, or null before the first one starts. */
+  activeStage: MigrationStageId | null;
+  /** Per-stage progress, keyed by stage id. */
+  stages: Partial<Record<MigrationStageId, MigrationStage>>;
+  /** Set when the run failed; the screen surfaces a retry rather than hanging. */
+  failed: boolean;
+
+  show: () => void;
+  hide: () => void;
+  beginStage: (id: MigrationStageId, total?: number) => void;
+  advanceStage: (id: MigrationStageId, done: number) => void;
+  fail: () => void;
+  reset: () => void;
+}
+
+const initial = {
+  visible: false,
+  activeStage: null as MigrationStageId | null,
+  stages: {} as Partial<Record<MigrationStageId, MigrationStage>>,
+  failed: false,
+};
+
+export const migrationGateStore = create<MigrationGateState>()((set) => ({
+  ...initial,
+
+  show: () => set({ visible: true, failed: false }),
+  hide: () => set({ visible: false }),
+
+  beginStage: (id, total) =>
+    set((s) => ({
+      activeStage: id,
+      stages: { ...s.stages, [id]: { id, total, done: total === undefined ? undefined : 0 } },
+    })),
+
+  // Guarded against a caller reporting progress for a stage that never began, which would
+  // otherwise render a bar with no total.
+  advanceStage: (id, done) =>
+    set((s) => (s.stages[id] === undefined
+      ? s
+      : { stages: { ...s.stages, [id]: { ...s.stages[id], done } } })),
+
+  fail: () => set({ failed: true }),
+  reset: () => set({ ...initial, stages: {} }),
+}));
+
+/** Non-reactive read for services that must not subscribe. */
+export const isMigrationGateVisible = (): boolean => migrationGateStore.getState().visible;
