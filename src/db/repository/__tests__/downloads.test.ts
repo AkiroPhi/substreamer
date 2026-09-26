@@ -630,3 +630,49 @@ describe('listDownloadedSongs — the sort order', () => {
     ).toEqual({ sort_title: 'wall', sort_artist: 'pink floyd' });
   });
 });
+
+describe('cover art prefers the LIBRARY row over the frozen download copy', () => {
+  // A server that re-issues its ids — Navidrome 0.64 — leaves the copy frozen at download
+  // time naming an image nothing else caches under, so these rows rendered placeholders
+  // while the same album was correct everywhere else.
+  it('uses albums.cover_art when the library row exists', async () => {
+    seedItem('al1', 'album', 1, ['s1']);
+    seedAlbumMeta('al1', { cover_art: 'al-al1_69eaaaa1' });
+    db().runSync('INSERT INTO albums (id, name, cover_art) VALUES (?, ?, ?)',
+      ['al1', 'Album al1', 'al-al1_f03281747779f8cb']);
+
+    const rows = await listDownloadedAlbums(db());
+    expect(rows[0].cover_art).toBe('al-al1_f03281747779f8cb');
+  });
+
+  it('falls back to the frozen copy when there is no library row', async () => {
+    // Offline, before the post-re-key sync has refilled the library.
+    seedItem('al2', 'album', 1, ['s2']);
+    seedAlbumMeta('al2', { cover_art: 'al-al2_69eaaaa1' });
+
+    const rows = await listDownloadedAlbums(db());
+    expect(rows[0].cover_art).toBe('al-al2_69eaaaa1');
+  });
+
+  it('falls back when the library row has no cover art of its own', async () => {
+    seedItem('al3', 'album', 1, ['s3']);
+    seedAlbumMeta('al3', { cover_art: 'al-al3_frozen' });
+    db().runSync('INSERT INTO albums (id, name, cover_art) VALUES (?, ?, ?)',
+      ['al3', 'Album al3', null]);
+
+    const rows = await listDownloadedAlbums(db());
+    expect(rows[0].cover_art).toBe('al-al3_frozen');
+  });
+
+  it('does the same for downloaded playlists', async () => {
+    seedItem('pl1', 'playlist', 1, ['s4']);
+    seedPlaylistMeta('pl1');
+    db().runSync('UPDATE cached_playlists SET cover_art = ? WHERE item_id = ?',
+      ['pl-pl1_frozen', 'pl1']);
+    db().runSync('INSERT INTO playlists (id, name, cover_art) VALUES (?, ?, ?)',
+      ['pl1', 'Playlist pl1', 'pl-pl1_current']);
+
+    const rows = await listDownloadedPlaylists(db());
+    expect(rows[0].cover_art).toBe('pl-pl1_current');
+  });
+});

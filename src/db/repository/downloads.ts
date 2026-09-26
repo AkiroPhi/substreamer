@@ -78,27 +78,45 @@ type CachedAlbumField = Exclude<
 >;
 
 const CACHED_ALBUM_FIELDS: readonly CachedAlbumField[] = [
-  'artist_id', 'name', 'artist', 'display_artist', 'cover_art', 'song_count', 'duration',
+  'artist_id', 'name', 'artist', 'display_artist', 'song_count', 'duration',
   'play_count', 'created', 'starred', 'year', 'genre', 'played', 'user_rating', 'version',
   'music_brainz_id', 'sort_name', 'sort_title', 'sort_artist', 'is_compilation',
   'explicit_status', 'original_release_year', 'original_release_month',
   'original_release_day', 'release_year', 'release_month', 'release_day',
 ];
 
+/**
+ * Cover art comes from the LIBRARY row when there is one, falling back to the frozen
+ * copy taken at download time.
+ *
+ * The two diverge. `cached_albums.cover_art` is whatever the server issued when the album
+ * was downloaded, and a server that re-issues its tokens — Navidrome 0.64 re-keys every
+ * id, and its artwork token embeds the id — leaves that copy naming an image nothing else
+ * caches under, so the row renders a placeholder while the same album is correct
+ * everywhere else. Preferring `albums.cover_art` keys off the value the rest of the app
+ * already uses, so it is a cache HIT rather than a second download of the same picture.
+ *
+ * This is the indirection `coverArtForSong` already does for songs, which is why the
+ * offline Songs tab was right while the Albums tab was not. The fallback keeps a download
+ * renderable when its library row is absent — offline before the first sync.
+ */
 const CACHED_ALBUM_COLS = [
   'ca."item_id" AS "id"',
+  'COALESCE(a."cover_art", ca."cover_art") AS "cover_art"',
   colsOf(CACHED_ALBUM_FIELDS, 'ca'),
 ].join(', ');
 
 type CachedPlaylistField = Exclude<keyof PlaylistListRow, 'id'>;
 
 const CACHED_PLAYLIST_FIELDS: readonly CachedPlaylistField[] = [
-  'name', 'comment', 'cover_art', 'created', 'changed', 'duration', 'owner', 'public',
+  'name', 'comment', 'created', 'changed', 'duration', 'owner', 'public',
   'song_count', 'sort_title',
 ];
 
+/** Library row first, frozen copy as fallback — see {@link CACHED_ALBUM_COLS}. */
 const CACHED_PLAYLIST_COLS = [
   'cp."item_id" AS "id"',
+  'COALESCE(p."cover_art", cp."cover_art") AS "cover_art"',
   colsOf(CACHED_PLAYLIST_FIELDS, 'cp'),
 ].join(', ');
 
@@ -154,6 +172,7 @@ export async function listDownloadedAlbums(
   return db.getAllAsync<AlbumListRow>(
     `SELECT ${CACHED_ALBUM_COLS} FROM cached_albums ca ` +
       'JOIN cached_items ci ON ci.item_id = ca.item_id ' +
+      'LEFT JOIN albums a ON a.id = ca.item_id ' +
       `WHERE ci.type='album'${partialGate(f.includePartial === true)} ` +
       `ORDER BY ${albumOrderBy(f.sortOrder)}`,
   );
@@ -168,6 +187,7 @@ export async function listDownloadedPlaylists(db: InternalDb): Promise<PlaylistL
   return db.getAllAsync<PlaylistListRow>(
     `SELECT ${CACHED_PLAYLIST_COLS} FROM cached_playlists cp ` +
       'JOIN cached_items ci ON ci.item_id = cp.item_id ' +
+      'LEFT JOIN playlists p ON p.id = cp.item_id ' +
       "WHERE ci.type='playlist' " +
       'ORDER BY cp."sort_title", cp."item_id"',
   );

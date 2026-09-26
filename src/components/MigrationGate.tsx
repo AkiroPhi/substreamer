@@ -14,6 +14,7 @@
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../hooks/useTheme';
@@ -49,6 +50,54 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
   if (!visible) return null;
 
   const activeIndex = STAGE_LABELS.findIndex((s) => s.id === activeStage);
+
+  // Finished. Shown rather than dismissed automatically: this is a one-shot irreversible
+  // migration, and a screen that silently vanishes leaves the user with no confirmation it
+  // ran at all. Startup work proceeds behind this — the marker is stamped, so nothing is
+  // waiting on the tap.
+  if (mode === 'complete') {
+    return (
+      <View
+        style={[
+          styles.root,
+          {
+            backgroundColor: colors.background,
+            paddingTop: insets.top + 24,
+            paddingBottom: insets.bottom + 24,
+          },
+        ]}
+      >
+        <View style={styles.content}>
+          <Animated.Text
+            entering={ZoomIn.springify().damping(12)}
+            style={[styles.tick, { color: colors.primary }]}
+          >
+            {'\u2713'}
+          </Animated.Text>
+          <Animated.View entering={FadeIn.delay(150)}>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>
+              {t('migrationCompleteTitle')}
+            </Text>
+            <Text style={[styles.body, { color: colors.textSecondary }]}>
+              {t('migrationCompleteBody')}
+            </Text>
+          </Animated.View>
+          <Animated.View entering={FadeIn.delay(300)} style={styles.completeButtonWrap}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => migrationGateStore.getState().hide()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+              ]}
+            >
+              <Text style={styles.primaryButtonLabel}>{t('migrationCompleteContinue')}</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+      </View>
+    );
+  }
 
   // The server's version string cannot always say whether it has been migrated — a
   // development build, or a snapshot whose tag predates 0.64.0. Guessing is not safe in
@@ -200,6 +249,8 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
 }
 
 const styles = StyleSheet.create({
+  tick: { fontSize: 64, lineHeight: 72, textAlign: 'center', marginBottom: 8 },
+  completeButtonWrap: { alignSelf: 'stretch' },
   root: {
     position: 'absolute',
     top: 0,

@@ -32,7 +32,7 @@ export interface MigrationStage {
  * `asking` — the server's version cannot settle whether the re-key is needed, so the user
  *   decides. They know whether they have updated their server; we do not.
  */
-export type MigrationGateMode = 'working' | 'asking';
+export type MigrationGateMode = 'working' | 'asking' | 'complete';
 
 interface MigrationGateState {
   /** True while the app must stay behind the screen. */
@@ -62,6 +62,12 @@ interface MigrationGateState {
   fail: () => void;
   /** Called immediately before the first write of the run. */
   markWritten: () => void;
+  /**
+   * The pass finished. Switches to the completion screen rather than hiding: a one-shot
+   * irreversible migration should end with the user SEEING that it finished, not with a
+   * screen that silently vanishes. The user dismisses it with `hide`.
+   */
+  complete: () => void;
   reset: () => void;
 }
 
@@ -97,6 +103,7 @@ export const migrationGateStore = create<MigrationGateState>()((set) => ({
 
   fail: () => set({ failed: true }),
   markWritten: () => set({ hasWritten: true }),
+  complete: () => set({ mode: 'complete', activeStage: null, failed: false }),
   reset: () => set({ ...initial, stages: {} }),
 }));
 

@@ -36,6 +36,14 @@ const MAX_LOG_BYTES = 4 * 1024 * 1024;
 const FLUSH_INTERVAL_MS = 2000;
 
 let enabled = false;
+/**
+ * Whether the flag file has been consulted at all this session.
+ *
+ * `enabled` defaults false and was only ever set by a sync run or the Logging screen, so
+ * anything logging BEFORE either — the Navidrome re-key runs during the splash — was
+ * silently discarded. The first log call now reads the flag itself.
+ */
+let flagRead = false;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
@@ -49,6 +57,7 @@ let writeQueue: Promise<void> = Promise.resolve();
  * cache mid-run, which the store could change underneath it.
  */
 export function readLibrarySyncLogFlag(): boolean {
+  flagRead = true;
   try {
     enabled = new File(Paths.document, LIBRARY_SYNC_DIAG_FLAG_FILE).exists;
   } catch {
@@ -57,8 +66,15 @@ export function readLibrarySyncLogFlag(): boolean {
   return enabled;
 }
 
+/** Test-only: forget that the flag file was ever consulted. */
+export function resetLibrarySyncLogFlagForTests(): void {
+  flagRead = false;
+  enabled = false;
+}
+
 /** Set the cached flag directly, for the store's own synchronous toggle. */
 export function setLibrarySyncLogFlag(next: boolean): void {
+  flagRead = true;
   enabled = next;
   if (!next) {
     buffer = [];
@@ -70,6 +86,9 @@ export function setLibrarySyncLogFlag(next: boolean): void {
 }
 
 export function logLibrarySync(message: string): void {
+  // Lazy first read, so a caller that runs before any sync still logs. Once per session:
+  // the per-call `exists` check this avoids is the reason this logger caches at all.
+  if (!flagRead) readLibrarySyncLogFlag();
   if (!enabled) return;
   buffer.push(`[${new Date().toISOString()}] ${message}\n`);
   if (flushTimer === null) {

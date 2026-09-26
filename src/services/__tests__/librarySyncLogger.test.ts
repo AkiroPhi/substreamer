@@ -6,6 +6,7 @@ import {
   flushLibrarySyncLog,
   logLibrarySync,
   readLibrarySyncLogFlag,
+  resetLibrarySyncLogFlagForTests,
   setLibrarySyncLogFlag,
 } from '../librarySyncLogger';
 
@@ -102,5 +103,33 @@ describe('librarySyncLogger', () => {
     expect(readLibrarySyncLogFlag()).toBe(false);
     new File(Paths.document, LIBRARY_SYNC_DIAG_FLAG_FILE).write('');
     expect(readLibrarySyncLogFlag()).toBe(true);
+  });
+});
+
+describe('logging before any sync run has started', () => {
+  // The Navidrome re-key runs during the splash, before the first sync and before the
+  // Logging screen mounts. `enabled` defaulted false and only those two read the flag, so
+  // the whole pass logged nothing - the one instrument for diagnosing a one-shot
+  // irreversible migration on a user's device.
+  it('reads the flag on first use rather than dropping the line', async () => {
+    mockFiles.clear();
+    mockFiles.set(LIBRARY_SYNC_DIAG_FLAG_FILE, '');
+    resetLibrarySyncLogFlagForTests();
+
+    logLibrarySync('[reid] map built: 44 ids change');
+    await flushLibrarySyncLog();
+
+    expect(mockFiles.get(LIBRARY_SYNC_DIAG_LOG_FILE) ?? '')
+      .toContain('[reid] map built: 44 ids change');
+  });
+
+  it('still drops the line when the flag file is absent', async () => {
+    mockFiles.clear();
+    resetLibrarySyncLogFlagForTests();
+
+    logLibrarySync('[reid] should not be written');
+    await flushLibrarySyncLog();
+
+    expect(mockFiles.get(LIBRARY_SYNC_DIAG_LOG_FILE) ?? '').toBe('');
   });
 });

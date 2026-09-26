@@ -26,7 +26,7 @@ import {
   clearImageCache,
   enqueueImageRefreshCycle,
 } from '../imageCacheService';
-import { logLibrarySync } from '../librarySyncLogger';
+import { flushLibrarySyncLog, logLibrarySync } from '../librarySyncLogger';
 import { migrationGateStore } from '../../store/migrationGateStore';
 import { rebuildTrackMaps } from '../musicCacheService';
 import { rehydrateAllStores } from '../../store/persistence/rehydrate';
@@ -188,9 +188,6 @@ async function execute(): Promise<void> {
     // the rehydrate reads the corrected values rather than writing stale ones back.
     await rekeyKvBlobs();
 
-    gate.beginStage('refreshingArtwork');
-    await refreshArtwork();
-
     gate.beginStage('finishing');
     // The stores still hold old ids in memory. Until they are rehydrated, any store-driven
     // write puts them straight back into SQL, and `reconcileMusicCacheAsync` — which reads
@@ -207,14 +204,25 @@ async function execute(): Promise<void> {
     await syncStatusStore.persist.rehydrate();
     await rebuildTrackMaps();
 
+    // AFTER the rehydrate, not before. `downloadedCoverArtIds()` reads `musicCacheStore`,
+    // and that set is the downloaded-item exemption in `purgeCoverArtRows` — run against
+    // stale pre-re-key state, a failed download during the re-warm could purge a
+    // downloaded item's cover rows with its protection silently inactive.
+    gate.beginStage('refreshingArtwork');
+    await refreshArtwork();
+
     await dropIdMap(db);
     setReidState('complete');
-    gate.hide();
     logLibrarySync('[reid] complete');
+    // Buffered behind a 2s timer and nothing wires a flush to AppState, so without this
+    // the lines explaining a run are exactly the ones an app kill loses.
+    await flushLibrarySyncLog();
+    gate.complete();
   } catch (e) {
     // The marker stays `pending`, so the next launch re-enters the interstitial and
     // repeats from the top. Every step is idempotent, so that is safe.
     logLibrarySync(`[reid] failed: ${e instanceof Error ? e.message : String(e)}`);
+    await flushLibrarySyncLog();
     gate.fail();
   }
 }

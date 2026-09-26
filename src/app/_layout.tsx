@@ -69,6 +69,8 @@ import { runSortKeyRebuildIfNeeded } from '../services/sortKeyRebuildService';
 import { hydrateDownloadedAlbumCoverArt } from '../hooks/useSongCoverArt';
 import { useLibrarySyncBackgroundNotification } from '../hooks/useLibrarySyncBackgroundNotification';
 import { useLibrarySyncKeepAwake } from '../hooks/useLibrarySyncKeepAwake';
+import { useMigrationGateBackgroundNotification } from '../hooks/useMigrationGateBackgroundNotification';
+import { useMigrationGateKeepAwake } from '../hooks/useMigrationGateKeepAwake';
 import {
   deferredImageCacheInit,
   initImageCache,
@@ -326,8 +328,11 @@ export default function RootLayout() {
   // A blocking one-time migration holds the app the same way the splash does, so the
   // startup effects gate on the pair rather than on the splash alone. One boolean, read
   // in three places, instead of a pause flag threaded through the services they call.
-  const migrationGateVisible = migrationGateStore((s) => s.visible);
-  const startupBlocked = splashVisible || migrationGateVisible;
+  // The COMPLETE screen is visible but no longer blocking: the marker is stamped and the
+  // pass is done, so startup proceeds behind it while the user reads it and taps on.
+  // Only a run still in flight (or waiting on the user's answer) holds the app back.
+  const migrationGateBlocking = migrationGateStore((s) => s.visible && s.mode !== 'complete');
+  const startupBlocked = splashVisible || migrationGateBlocking;
   const rehydrated = authStore((s) => s.rehydrated);
   const isLoggedIn = authStore((s) => s.isLoggedIn);
   const { theme, colors, preference } = useTheme();
@@ -389,6 +394,10 @@ export default function RootLayout() {
   useDownloadKeepAwake();
   useDownloadBackgroundNotification();
   useLibrarySyncKeepAwake();
+  // The migration is foreground-only and cannot resume while suspended: hold the screen
+  // on while it runs, and ask the user back if they leave.
+  useMigrationGateKeepAwake();
+  useMigrationGateBackgroundNotification();
   useLibrarySyncBackgroundNotification();
 
   // --- Global SSL cert prompt driven by certPromptStore ---
