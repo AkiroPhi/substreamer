@@ -104,7 +104,7 @@ export function isReidComplete(): boolean {
  * which is the one direction that must not fail. So fall back to the persisted blob,
  * which `kvStorageSync` can read on the spot.
  */
-function serverInfo(): { serverType: string | null; serverVersion: string | null } {
+export function currentServerInfo(): { serverType: string | null; serverVersion: string | null } {
   const live = serverInfoStore.getState();
   if (live.serverType !== null) return live;
   try {
@@ -133,8 +133,10 @@ function serverInfo(): { serverType: string | null; serverVersion: string | null
  */
 export function reidVerdict(): ReidVerdict {
   if (isReidComplete()) return 'skip';
-  const { serverType, serverVersion } = serverInfo();
-  const verdict = navidromeReidVerdict(serverType, serverVersion);
+  const { serverType, serverVersion } = currentServerInfo();
+  // The probe, when it has an answer, outranks the persisted copy — that copy is the
+  // pre-upgrade version on exactly the launch this pass exists for.
+  const verdict = navidromeReidVerdict(serverType, probedVersion ?? serverVersion);
   // The user has already answered the prompt; do not ask again.
   return verdict === 'ask' && userConfirmed() ? 'run' : verdict;
 }
@@ -157,5 +159,60 @@ export function isReidRequired(): boolean {
 export function shouldBlockContent(): boolean {
   // `ask` blocks too. An undecided server is one we may be about to re-key, and serving
   // a car head unit ids we are unsure about is the case this exists to prevent.
+  return reidVerdict() !== 'skip';
+}
+
+// --- The live version probe -------------------------------------------------------
+//
+// The verdict depends on the server's CURRENT version, but `serverInfoStore` holds the
+// version as of the last session. On the one launch this pass exists for — the first
+// after the user upgrades their server — that copy is the pre-upgrade version and the
+// verdict comes back `skip`. So the version is probed before the app launches.
+//
+// The result lives HERE, in module state, and is never routed through `serverInfoStore`:
+// zustand's default persist merge is `{...current, ...persisted}` applied with
+// `set(state, true)` (`zustand/middleware.js:337-340, 419-423`), so the persisted value
+// wins and a probe landing before hydration would be clobbered back to the stale one.
+
+/** The version the server reported this session, authoritative over the persisted copy. */
+let probedVersion: string | null = null;
+/** Whether the probe has produced an answer yet. Until it has, writes are refused. */
+let probeSettled = false;
+
+/**
+ * The network half lives in `reidProbe`, not here. This module is imported by
+ * `db/repository/{songs,albums}` for the write guard, and that layer must not pull in
+ * `subsonicService` and the Expo stack behind it.
+ */
+export function setProbedVersion(version: string | null): void {
+  if (version !== null) probedVersion = version;
+}
+
+/** Called by the probe when it has an answer, or has given up. */
+export function markProbeSettled(): void {
+  probeSettled = true;
+}
+
+/** Test-only: forget the probe result. */
+export function resetReidProbeForTests(): void {
+  probedVersion = null;
+  probeSettled = false;
+}
+
+/**
+ * Must server-sourced library writes be refused right now?
+ *
+ * Separate from {@link shouldBlockContent}, which gates the headless READ paths. Those
+ * never probe, so widening that function would make a CarPlay cold wake serve nothing to
+ * every Navidrome user for as long as the app was not launched.
+ *
+ * An unsettled probe counts as blocked. That is the fail-safe direction and it is what
+ * makes a bounded probe acceptable: timing out costs a delayed sync, never a library
+ * written half in retired ids and half in current ones.
+ */
+export function shouldBlockLibraryWrites(): boolean {
+  if (isReidComplete()) return false;
+  if (currentServerInfo().serverType?.toLowerCase() !== 'navidrome') return false;
+  if (!probeSettled) return true;
   return reidVerdict() !== 'skip';
 }

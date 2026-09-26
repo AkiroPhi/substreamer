@@ -41,6 +41,7 @@ import { clearAlbumCoverArtCache } from '@/hooks/useSongCoverArt';
 import { offlineModeStore } from '@/store/offlineModeStore';
 import { ratingStore } from '@/store/ratingStore';
 import { serverInfoStore } from '@/store/serverInfoStore';
+import { shouldBlockLibraryWrites } from './navidromeReid/reidMarker';
 import { syncStatusStore, type SyncStrategy } from '@/store/syncStatusStore';
 import {
   flushLibrarySyncLog,
@@ -571,6 +572,14 @@ export async function refreshPlaylistLibrary(): Promise<void> {
 export function runNormalizedLibrarySync(
   opts: { full?: boolean; reason?: string } = {},
 ): Promise<void> {
+  // Refused outright rather than left to the guard inside `upsertSongs` / `upsertAlbums`:
+  // that one returns 0 rows written, which this walk cannot tell from an empty page, so
+  // it would page the whole library advancing cursors and persist a "complete" sync that
+  // wrote nothing.
+  if (shouldBlockLibraryWrites()) {
+    logLibrarySync(`sync refused — Navidrome re-key outstanding (reason=${opts.reason ?? 'unknown'})`);
+    return Promise.resolve();
+  }
   const gen = syncStatusStore.getState().generation;
   const canJoin = inFlight !== null && gen === inFlightGen && (!opts.full || inFlightFull);
   if (canJoin) return inFlight as Promise<void>;

@@ -8,14 +8,39 @@ jest.mock('../../../store/persistence', () => ({
   },
 }));
 
+let mockPing: unknown = { status: 'ok', serverVersion: '0.64.0 (1072e9f7)' };
+let mockPingDelayMs = 0;
+let mockApiNull = false;
+jest.mock('../../subsonicService', () => ({
+  getApi: () => (mockApiNull ? null : {
+    ping: () => new Promise((resolve, reject) => {
+      setTimeout(() => (mockPing instanceof Error ? reject(mockPing) : resolve(mockPing)), mockPingDelayMs);
+    }),
+  }),
+}));
+
+let mockHasConnection = true;
+let mockServerReachable = true;
+jest.mock('../../../store/connectivityStore', () => ({
+  connectivityStore: {
+    getState: () => ({
+      hasConnection: mockHasConnection,
+      isServerReachable: mockServerReachable,
+    }),
+  },
+}));
+
 let mockServerType: string | null = 'navidrome';
 let mockServerVersion: string | null = '0.64.0 (1072e9f7)';
 jest.mock('../../../store/serverInfoStore', () => ({
   serverInfoStore: { getState: () => ({ serverType: mockServerType, serverVersion: mockServerVersion }) },
 }));
 
+import { probeServerVersion, resetReidProbeInFlightForTests } from '../reidProbe';
 import {
   clearReidMarker,
+  resetReidProbeForTests,
+  shouldBlockLibraryWrites,
   isReidComplete,
   isReidRequired,
   reidVerdict,
@@ -27,6 +52,13 @@ beforeEach(() => {
   mockStore.clear();
   mockServerType = 'navidrome';
   mockServerVersion = '0.64.0 (1072e9f7)';
+  mockPing = { status: 'ok', serverVersion: '0.64.0 (1072e9f7)' };
+  mockPingDelayMs = 0;
+  mockApiNull = false;
+  mockHasConnection = true;
+  mockServerReachable = true;
+  resetReidProbeForTests();
+  resetReidProbeInFlightForTests();
 });
 
 describe('reidMarker', () => {
@@ -147,5 +179,89 @@ describe('reidMarker', () => {
       mockServerType = 'subsonic';
       expect(reidVerdict()).toBe('skip');
     });
+  });
+});
+
+describe('the live version probe', () => {
+  // The bug this exists for: the persisted version is the PRE-upgrade one on exactly the
+  // launch the pass is needed.
+  it('overrides a stale persisted version with what the server reports', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    expect(reidVerdict()).toBe('skip');          // stale copy says unaffected
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(reidVerdict()).toBe('run');           // the server says otherwise
+  });
+
+  it('does not route through serverInfoStore, which a late hydration would clobber', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    await (probeServerVersion() ?? Promise.resolve());
+    // Simulate zustand's persist merge restoring the stale value after hydration.
+    mockServerType = 'navidrome';
+    mockServerVersion = '0.61.2 (aa84e645)';
+    expect(reidVerdict()).toBe('run');
+  });
+
+  it('blocks library writes until the probe settles', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    expect(shouldBlockLibraryWrites()).toBe(true);   // unsettled - fail safe
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(shouldBlockLibraryWrites()).toBe(true);   // settled, and it IS affected
+  });
+
+  it('releases writes once the probe confirms an unaffected server', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    mockPing = { status: 'ok', serverVersion: '0.61.2 (aa84e645)' };
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(reidVerdict()).toBe('skip');
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('settles, rather than blocking forever, when the server is unreachable', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    mockPing = new Error('unreachable');
+    await (probeServerVersion() ?? Promise.resolve());
+    // A server that cannot answer a ping cannot serve a sync either.
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('settles in offline mode without a request', async () => {
+    mockApiNull = true;
+    mockServerVersion = '0.61.2 (aa84e645)';
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('never blocks writes for a non-Navidrome server', () => {
+    mockServerType = 'subsonic';
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('never blocks writes once the pass has completed', () => {
+    setReidState('complete');
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('runs at most one request for concurrent callers', async () => {
+    mockPingDelayMs = 5;
+    await Promise.all([probeServerVersion(), probeServerVersion(), probeServerVersion()].map((p) => p ?? Promise.resolve()));
+    expect(reidVerdict()).toBe('run');
+  });
+
+  it('does not hold the splash when the server is known unreachable', () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    mockServerReachable = false;
+    // null means "nothing to wait for" — the caller proceeds in the same tick.
+    expect(probeServerVersion()).toBeNull();
+    expect(shouldBlockLibraryWrites()).toBe(false);
+  });
+
+  it('returns null synchronously for a non-Navidrome server', () => {
+    mockServerType = 'subsonic';
+    expect(probeServerVersion()).toBeNull();
+  });
+
+  it('returns null synchronously once the pass is complete', () => {
+    setReidState('complete');
+    expect(probeServerVersion()).toBeNull();
   });
 });

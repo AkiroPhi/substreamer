@@ -22,6 +22,9 @@ import { runWhenIdle } from '../utils/runWhenIdle';
 import { kvStorage } from '../store/persistence';
 import { downloadedMetadataRefreshStore } from '../store/downloadedMetadataRefreshStore';
 import { refreshDownloadedMetadata } from './downloadedMetadataService';
+import { logLibrarySync } from './librarySyncLogger';
+import { probeServerVersion } from './navidromeReid/reidProbe';
+import { shouldBlockLibraryWrites } from './navidromeReid/reidMarker';
 import { serverInfoStore } from '../store/serverInfoStore';
 import { syncStatusStore, type SyncScope } from '../store/syncStatusStore';
 import { fireAndForget } from '../utils/fireAndForget';
@@ -216,6 +219,19 @@ export async function onOnlineResume(): Promise<void> {
 }
 
 async function startupOrResumeFlow(): Promise<void> {
+  // Settle the Navidrome re-key question BEFORE anything fetches. The probe is a no-op
+  // once the splash has run it; it does real work only on an online-resume, which is the
+  // path that can discover an upgraded server mid-session. Awaiting rather than
+  // early-returning on a blocked verdict matters: nothing re-triggers this flow, so a
+  // bare `return` while the answer was still pending would cost the session its sync.
+  await (probeServerVersion() ?? Promise.resolve());
+  if (shouldBlockLibraryWrites()) {
+    // The ids this fan-out would write do not match the ones the rest of the install
+    // holds. Writing both is what doubles the library.
+    logLibrarySync('[reid] startup fan-out refused — re-key outstanding');
+    return;
+  }
+
   fetchServerInfo().then((info) => {
     if (info) serverInfoStore.getState().setServerInfo(info);
   });

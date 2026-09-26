@@ -31,6 +31,12 @@ import { setArtistTopSongs, upsertArtistBio, upsertArtistInfo, upsertArtists } f
 import { setPlaylistSongs, upsertPlaylists } from './repository/playlists';
 import { upsertSongs } from './repository/songs';
 
+/**
+ * Every upsert in this file converts LOCAL legacy blobs, so its ids are legitimately the
+ * pre-re-key ones. Without this the Navidrome write guard would refuse the whole chain.
+ */
+const FROM_MIGRATION = { fromMigration: true } as const;
+
 export interface TableMigration {
   source: number;
   migrated: number;
@@ -198,7 +204,7 @@ async function migrateArtists(
     const top = e.topSongs ?? [];
     if (top.length > 0) {
       // eslint-disable-next-line no-await-in-loop
-      await upsertSongs(db, top, undefined, articles);
+      await upsertSongs(db, top, undefined, articles, FROM_MIGRATION);
       // Stamp the state row too, or the migrated artist reads as never-fetched and
       // re-fetches on first open. `listLength` is unknown here, so use what was stored.
       // eslint-disable-next-line no-await-in-loop
@@ -242,7 +248,7 @@ async function migratePlaylists(
     // `song_index`); without this they'd be silently dropped from the offline playlist.
     const entry = pl.entry ?? [];
     // eslint-disable-next-line no-await-in-loop
-    if (entry.length > 0) await upsertSongs(db, entry, undefined, articles);
+    if (entry.length > 0) await upsertSongs(db, entry, undefined, articles, FROM_MIGRATION);
     const ids = entry.map((s) => s.id).filter(Boolean);
     // Awaited: the ETL's caller stamps a one-shot done flag when it returns, so a write
     // still in flight at that point is lost with nothing left to re-run it.
@@ -309,8 +315,10 @@ async function upsertDetailEnvelopes(
     if (!needSongs) continue;
     for (const s of album.song ?? []) if (s?.id) songRows.push(s);
   }
-  const albums = albumRows.length ? await upsertAlbums(db, albumRows, undefined, articles) : 0;
-  const songs = songRows.length ? await upsertSongs(db, songRows, undefined, articles) : 0;
+  const albums = albumRows.length
+    ? await upsertAlbums(db, albumRows, undefined, articles, FROM_MIGRATION) : 0;
+  const songs = songRows.length
+    ? await upsertSongs(db, songRows, undefined, articles, FROM_MIGRATION) : 0;
   return { albums, songs };
 }
 
@@ -477,7 +485,7 @@ export async function migrateBlobsToNormalized(
         db,
         'library_albums',
         'raw_json',
-        (d, items) => upsertAlbums(d, items, undefined, articles),
+        (d, items) => upsertAlbums(d, items, undefined, articles, FROM_MIGRATION),
         log,
         bump,
       )
@@ -488,7 +496,7 @@ export async function migrateBlobsToNormalized(
   const legacyAlbums = await readKvState<{ albums?: AlbumID3[] }>(db, ALBUM_LIBRARY_KEY);
   const kvAlbums = legacyAlbums?.albums?.filter((a) => a?.id) ?? [];
   if (kvAlbums.length > 0) {
-    await upsertAlbums(db, kvAlbums, undefined, articles);
+    await upsertAlbums(db, kvAlbums, undefined, articles, FROM_MIGRATION);
     log?.(`[normalized] album-library KV: ${kvAlbums.length} album(s)`);
     albums = {
       source: albums.source + kvAlbums.length,
@@ -501,7 +509,7 @@ export async function migrateBlobsToNormalized(
         db,
         'song_index',
         'raw_json',
-        (d, items) => upsertSongs(d, items, undefined, articles),
+        (d, items) => upsertSongs(d, items, undefined, articles, FROM_MIGRATION),
         log,
         bump,
       )

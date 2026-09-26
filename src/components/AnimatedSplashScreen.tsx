@@ -27,6 +27,7 @@ import {
   runMigrations,
 } from '../services/migrationService';
 import { rehydrateAllStores } from '../store/persistence/rehydrate';
+import { probeServerVersion } from '../services/navidromeReid/reidProbe';
 import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
 // Synchronous adapter: the splash reads `completedVersion` before the store
@@ -153,12 +154,13 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // schema. Deliberately NOT keyed off the splash finishing: the safety timeout
           // fires that unconditionally, mid-migration on any large library.
           //
-          // Called synchronously, so the interstitial is up in this same tick rather than
-          // a hydration later — the splash starts its fade right after this and
-          // `_layout` reads the splash going away as "startup may proceed". `reidVerdict`
-          // reads the server's version through `kvStorageSync`, so it needs no hydration.
-          void runNavidromeReidIfNeeded();
-          setMigrationPhase('done');
+          // Ask the server its CURRENT version before deciding. The persisted copy is the
+          // pre-upgrade one on exactly the launch this pass exists for. Bounded well under
+          // the safety timeout, and a failure still leaves library writes refused, so a
+          // slow server delays the decision rather than losing it.
+          const decide = (): void => { runNavidromeReidIfNeeded(); setMigrationPhase('done'); };
+          const probe = probeServerVersion();
+          if (probe) void probe.then(decide); else decide();
         })
         .catch((e) => {
           // Defensive: runMigrations catches its own task-level errors
@@ -234,10 +236,11 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
       void rehydrateAllStores();
       // Nothing pending still means the chain is complete, and this is the common launch
       // — a re-key triggered by the user's SERVER changing, not by our schema, has to be
-      // reachable here too. Synchronous, and BEFORE `fadeOut`: this path fades out
-      // immediately, so anything awaited here would let the splash finish first.
-      void runNavidromeReidIfNeeded();
-      fadeOut();
+      // reachable here too. The fade waits on the probe: this path fades immediately, so
+      // deciding after it would let the splash finish first and the app launch unguarded.
+      const decide = (): void => { runNavidromeReidIfNeeded(); fadeOut(); };
+      const probe = probeServerVersion();
+      if (probe) void probe.then(decide); else decide();
       return;
     }
 
