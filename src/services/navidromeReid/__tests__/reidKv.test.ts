@@ -34,28 +34,6 @@ describe('rekeyKvBlobs', () => {
     });
   });
 
-  it('re-keys the sync bookkeeping and clears the cursors', async () => {
-    write('substreamer-sync-status', {
-      notFoundAlbumIds: [LEGACY, 'unmoved'],
-      lastKnownNewestAlbumId: LEGACY,
-      librarySyncCursor: 'someOldId',
-      songSyncCursor: 'anotherOldId',
-      songSyncComplete: true,
-    });
-
-    await rekeyKvBlobs();
-    const state = read('substreamer-sync-status').state;
-
-    expect(state.notFoundAlbumIds).toEqual([CANONICAL, 'unmoved']);
-    expect(state.lastKnownNewestAlbumId).toBe(CANONICAL);
-    // Cursors are deliberately untouched here — they are number-typed with completion
-    // flags attached, and discardLibrary resets the whole set through the store.
-    expect(state.librarySyncCursor).toBe('someOldId');
-    expect(state.songSyncCursor).toBe('anotherOldId');
-    // Unrelated fields survive.
-    expect(state.songSyncComplete).toBe(true);
-  });
-
   it('empties the stale album lists rather than re-keying them', async () => {
     write('substreamer-album-lists', {
       recentlyAdded: [{ id: LEGACY }],

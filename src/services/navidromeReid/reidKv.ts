@@ -6,15 +6,17 @@
  * get here their data lives in tables and is re-keyed with everything else.
  *
  *   substreamer-ratings       keys are entity ids, and no table ever took this over
- *   substreamer-sync-status   notFoundAlbumIds + lastKnownNewestAlbumId, plus cursors
  *   substreamer-album-lists   a stale blob from a pre-normalized install; cleared
+ *
+ * `substreamer-sync-status` is deliberately NOT here. Everything in it that holds an id is
+ * cleared by `discardLibrary` through the store — editing the blob from this side raced
+ * that store's own write to the same key.
  */
 
 import { canonicalId } from './canonicalId';
 import { kvStorage } from '../../store/persistence';
 
 const RATINGS_KEY = 'substreamer-ratings';
-const SYNC_STATUS_KEY = 'substreamer-sync-status';
 const ALBUM_LISTS_KEY = 'substreamer-album-lists';
 
 /** Zustand's persist envelope. Fields we do not touch must survive untouched. */
@@ -69,35 +71,6 @@ async function rekeyRatings(): Promise<void> {
 }
 
 /**
- * Re-key the sync bookkeeping, and clear the cursors.
- *
- * `notFoundAlbumIds` and `lastKnownNewestAlbumId` are entity ids and move like any other.
- * The cursors are left to `discardLibrary`, which resets them through the store's own
- * `resetLibrarySync` / `resetSongSync` — they are numbers with completion flags attached,
- * and hand-clearing half of that set is what left the sync believing it was done.
- */
-async function rekeySyncStatus(): Promise<void> {
-  const blob = await readBlob(SYNC_STATUS_KEY);
-  if (!blob?.state) return;
-  const state = { ...blob.state };
-
-  if (Array.isArray(state.notFoundAlbumIds)) {
-    state.notFoundAlbumIds = (state.notFoundAlbumIds as unknown[]).map(
-      (id) => (typeof id === 'string' ? moved(id) ?? id : id),
-    );
-  }
-  if (typeof state.lastKnownNewestAlbumId === 'string') {
-    state.lastKnownNewestAlbumId = moved(state.lastKnownNewestAlbumId) ?? state.lastKnownNewestAlbumId;
-  }
-  // The cursors are NOT touched here. They are typed `number` with an initial 0, so
-  // writing null would rehydrate into arithmetic — and clearing them alone leaves
-  // `librarySyncComplete` / `songSyncComplete` set, which is half of why no resync fires.
-  // `discardLibrary` calls `resetLibrarySync()` / `resetSongSync()`, which clear the
-  // cursors, the flags, the phase and the strategy together.
-  await kvStorage.setItem(SYNC_STATUS_KEY, JSON.stringify({ ...blob, state }));
-}
-
-/**
  * Drop the stale home-screen lists.
  *
  * On a pre-normalized install this blob holds four full `AlbumID3` arrays; on the current
@@ -120,6 +93,5 @@ async function clearAlbumLists(): Promise<void> {
 /** Re-key every KV blob that still holds entity ids. */
 export async function rekeyKvBlobs(): Promise<void> {
   await rekeyRatings();
-  await rekeySyncStatus();
   await clearAlbumLists();
 }

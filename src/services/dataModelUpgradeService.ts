@@ -28,8 +28,8 @@ import { migrationChainComplete } from './migrationService';
  * VERSIONED rather than a boolean: when the migration gains a step, bump this so
  * already-stamped installs re-run (`migrateBlobsToNormalized` is idempotent upserts)
  * rather than stacking a second migration on top of the first. */
-const MIGRATION_VERSION = '3';
-const MIGRATION_DONE_KEY = 'substreamer-normalized-migration-complete';
+export const MIGRATION_VERSION = '3';
+export const MIGRATION_DONE_KEY = 'substreamer-normalized-migration-complete';
 
 let inFlight: Promise<void> | null = null;
 

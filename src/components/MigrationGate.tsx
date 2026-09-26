@@ -44,6 +44,7 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
   const activeStage = migrationGateStore((s) => s.activeStage);
   const stages = migrationGateStore((s) => s.stages);
   const failed = migrationGateStore((s) => s.failed);
+  const hasWritten = migrationGateStore((s) => s.hasWritten);
 
   if (!visible) return null;
 
@@ -165,19 +166,28 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
             >
               <Text style={styles.primaryButtonLabel}>{t('migrationGateRetry')}</Text>
             </Pressable>
-            {/* Without this the app is unreachable forever: an unsupported pragma fails
-                identically on every relaunch, and the user's downloads sit on disk behind
-                a wall. The marker stays `pending`, so the headless path is still blocked
-                and the pass retries next launch. */}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => migrationGateStore.getState().hide()}
-              style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
-            >
-              <Text style={[styles.secondaryButtonLabel, { color: colors.textSecondary }]}>
-                {t('migrationGateContinueAnyway')}
+            {/* Only offered when the run failed BEFORE writing anything — an unsupported
+                pragma, or no database. Those fail identically on every relaunch, so without
+                an escape the app is unreachable forever with the downloads intact on disk.
+                After a write there is no safe way out: the database is re-keyed, the files
+                are not yet moved, and launching lets the reconcile delete them all. Retry
+                is the only option there. */}
+            {!hasWritten && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => migrationGateStore.getState().hide()}
+                style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Text style={[styles.secondaryButtonLabel, { color: colors.textSecondary }]}>
+                  {t('migrationGateContinueAnyway')}
+                </Text>
+              </Pressable>
+            )}
+            {hasWritten && (
+              <Text style={[styles.footnote, { color: colors.textSecondary }]}>
+                {t('migrationGateMustFinish')}
               </Text>
-            </Pressable>
+            )}
           </>
         )}
 

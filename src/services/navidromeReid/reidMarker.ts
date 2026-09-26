@@ -20,6 +20,8 @@ import { serverInfoStore } from '../../store/serverInfoStore';
 import { navidromeReidVerdict, type ReidVerdict } from './navidromeVersion';
 
 const MARKER_KEY = 'substreamer-navidrome-reid';
+/** Where `serverInfoStore` persists. Read directly when the store has not hydrated. */
+const SERVER_INFO_KEY = 'substreamer-server-info';
 /** Set when the user answers the `ask` prompt: they told us their server is updated. */
 const OVERRIDE_KEY = 'substreamer-navidrome-reid-confirmed';
 
@@ -93,6 +95,34 @@ export function isReidComplete(): boolean {
 }
 
 /**
+ * The server's type and version, without waiting for a hydration.
+ *
+ * `serverInfoStore` persists through the ASYNC `kvStorage`, so on a headless cold wake —
+ * exactly the path {@link shouldBlockContent} exists for — its in-memory state is still
+ * the initial `serverType: null` when this is called. Reading the store alone therefore
+ * answers "not Navidrome" for an affected server and the content block never engages,
+ * which is the one direction that must not fail. So fall back to the persisted blob,
+ * which `kvStorageSync` can read on the spot.
+ */
+function serverInfo(): { serverType: string | null; serverVersion: string | null } {
+  const live = serverInfoStore.getState();
+  if (live.serverType !== null) return live;
+  try {
+    const raw = kvStorageSync.getItem(SERVER_INFO_KEY);
+    if (typeof raw !== 'string' || raw === '') return live;
+    const parsed = JSON.parse(raw) as { state?: Record<string, unknown> };
+    const { serverType, serverVersion } = parsed.state ?? {};
+    return {
+      serverType: typeof serverType === 'string' ? serverType : null,
+      serverVersion: typeof serverVersion === 'string' ? serverVersion : null,
+    };
+  } catch {
+    // Unreadable: keep the store's answer rather than inventing one.
+    return live;
+  }
+}
+
+/**
  * What should happen about the re-key on this launch?
  *
  * `run` unattended, `skip` entirely, or `ask` the user because the server's version string
@@ -103,7 +133,7 @@ export function isReidComplete(): boolean {
  */
 export function reidVerdict(): ReidVerdict {
   if (isReidComplete()) return 'skip';
-  const { serverType, serverVersion } = serverInfoStore.getState();
+  const { serverType, serverVersion } = serverInfo();
   const verdict = navidromeReidVerdict(serverType, serverVersion);
   // The user has already answered the prompt; do not ask again.
   return verdict === 'ask' && userConfirmed() ? 'run' : verdict;

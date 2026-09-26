@@ -120,7 +120,11 @@ export async function moveDownloadedFiles(
  * Only ones this pass actually moved files out of, and only when they are genuinely empty
  * — a directory still holding something is left alone, because the something is a file we
  * failed to move or never knew about, and deleting it would destroy a download.
- * `_unknown` is never swept: it is a real bucket, not a stale id.
+ *
+ * The `_unknown` skip is belt-and-braces rather than a live branch: the bucket is a
+ * literal, never an entry in the id map, so a song in it always has `oldAlbum ===
+ * newAlbum` and the directory never reaches this set. It stays because the operation
+ * guarded is an unrecoverable delete of a user's downloads.
  */
 async function removeEmptiedAlbumDirs(root: Directory, dirs: Set<string>): Promise<void> {
   for (const name of dirs) {

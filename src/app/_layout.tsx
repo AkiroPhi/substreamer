@@ -450,7 +450,11 @@ export default function RootLayout() {
 
   // --- Resume the album-detail walk on AppState active transitions ---
   useEffect(() => {
-    if (!isLoggedIn) return;
+    // Also held by the migration gate: a foreground transition while it is up fires
+    // recoverStalledSync and refreshAllIfDue, which write the very tables the pass is
+    // about to delete — and a write landing after the discard leaves a half-repopulated
+    // library. A minute-long progress screen is exactly when people switch apps.
+    if (!isLoggedIn || startupBlocked) return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         void recoverStalledSync();
@@ -471,7 +475,7 @@ export default function RootLayout() {
       }
     });
     return () => sub.remove();
-  }, [isLoggedIn]);
+  }, [isLoggedIn, startupBlocked]);
 
   // --- Rehydrate auth from SQLite ---
   useEffect(() => {

@@ -106,4 +106,46 @@ describe('reidMarker', () => {
     mockServerType = 'subsonic';
     expect(shouldBlockContent()).toBe(false);
   });
+
+  describe('before serverInfoStore has hydrated', () => {
+    // The store persists through the ASYNC kvStorage, so a headless cold wake reads
+    // serverType: null from memory while the persisted blob says navidrome.
+    beforeEach(() => {
+      mockServerType = null;
+      mockServerVersion = null;
+      mockStore.set(
+        'substreamer-server-info',
+        JSON.stringify({ state: { serverType: 'navidrome', serverVersion: '0.64.0 (1072e9f7)' } }),
+      );
+    });
+
+    it('falls back to the persisted blob rather than reading as "not Navidrome"', () => {
+      expect(reidVerdict()).toBe('run');
+      expect(shouldBlockContent()).toBe(true);
+    });
+
+    it('still skips when the persisted server is below 0.64', () => {
+      mockStore.set(
+        'substreamer-server-info',
+        JSON.stringify({ state: { serverType: 'navidrome', serverVersion: '0.63.3 (abc)' } }),
+      );
+      expect(reidVerdict()).toBe('skip');
+    });
+
+    it('skips when nothing is persisted either - no server, nothing to corrupt', () => {
+      mockStore.delete('substreamer-server-info');
+      expect(reidVerdict()).toBe('skip');
+      expect(shouldBlockContent()).toBe(false);
+    });
+
+    it('keeps the store answer when the blob is corrupt', () => {
+      mockStore.set('substreamer-server-info', '{not json');
+      expect(reidVerdict()).toBe('skip');
+    });
+
+    it('prefers the live store once it HAS hydrated', () => {
+      mockServerType = 'subsonic';
+      expect(reidVerdict()).toBe('skip');
+    });
+  });
 });

@@ -39,21 +39,13 @@ import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
 import { kvStorage } from '../../store/persistence';
 import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
+import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../dataModelUpgradeService';
 import {
   deleteSupersededRows,
   rekeyEmbeddedIds,
   rekeyPlainColumns,
   verifyDeferredForeignKeys,
 } from './reidRekey';
-
-/**
- * The blob-to-SQL ETL's completion key and the version it stamps
- * (`dataModelUpgradeService.ts:31-32`). Stamped here because the pass discards the library
- * the ETL would import into — left unstamped, the idle orchestrator would re-import
- * retired ids from the surviving legacy blobs straight after the pass finished.
- */
-const ETL_DONE_KEY = 'substreamer-normalized-migration-complete';
-const ETL_DONE_VALUE = '3';
 
 let inFlight: Promise<void> | null = null;
 
@@ -142,6 +134,11 @@ async function execute(): Promise<void> {
     // Only now that we know there IS work. Clearing these above the early exit destroyed
     // the saved queue and every queued download for anyone already canonical — a fresh
     // sign-in on 0.64, or anyone who had re-synced.
+    // From here on the run writes. A failure after this point cannot be walked away from:
+    // the database ends up re-keyed with files still at their old paths, and launching the
+    // app into that lets `reconcileMusicCacheAsync` delete every download as an orphan.
+    gate.markWritten();
+
     await clearLiveQueue(db);
     await clearDownloadQueue(db);
 
@@ -179,8 +176,12 @@ async function execute(): Promise<void> {
     // while the store had just been rehydrated to canonical ones, the zero overlap would
     // tear down the whole starred download.
     const cleared = await discardLibrary(db);
-    // Nothing will import retired ids from the surviving blobs afterwards.
-    await kvStorage.setItem(ETL_DONE_KEY, ETL_DONE_VALUE);
+    // Stamp the blob-to-SQL ETL complete. The pass has just discarded the library that
+    // ETL imports INTO, so leaving it unstamped lets the idle orchestrator re-import
+    // retired ids from the legacy blobs that survive the chain. Imported rather than
+    // copied: the version is meant to be bumped when the ETL gains a step, and a local
+    // copy would go stale silently.
+    await kvStorage.setItem(MIGRATION_DONE_KEY, MIGRATION_VERSION);
     logLibrarySync(`[reid] library discarded (${cleared} tables) — one sync will refill it`);
 
     // The KV blobs that survive the migration chain. Done before the stores rehydrate, so

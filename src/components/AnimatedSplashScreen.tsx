@@ -26,7 +26,7 @@ import {
   getPendingTasks,
   runMigrations,
 } from '../services/migrationService';
-import { awaitKvHydration, rehydrateAllStores } from '../store/persistence/rehydrate';
+import { rehydrateAllStores } from '../store/persistence/rehydrate';
 import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
 // Synchronous adapter: the splash reads `completedVersion` before the store
@@ -153,10 +153,11 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // schema. Deliberately NOT keyed off the splash finishing: the safety timeout
           // fires that unconditionally, mid-migration on any large library.
           //
-          // The KV hydration is awaited first because the check reads serverInfoStore,
-          // which persists through the ASYNC adapter — an unhydrated read gives
-          // serverType === null, which reads as "not Navidrome" and silently skips.
-          void awaitKvHydration().then(() => runNavidromeReidIfNeeded());
+          // Called synchronously, so the interstitial is up in this same tick rather than
+          // a hydration later — the splash starts its fade right after this and
+          // `_layout` reads the splash going away as "startup may proceed". `reidVerdict`
+          // reads the server's version through `kvStorageSync`, so it needs no hydration.
+          void runNavidromeReidIfNeeded();
           setMigrationPhase('done');
         })
         .catch((e) => {
@@ -233,8 +234,9 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
       void rehydrateAllStores();
       // Nothing pending still means the chain is complete, and this is the common launch
       // — a re-key triggered by the user's SERVER changing, not by our schema, has to be
-      // reachable here too. Awaits KV hydration for the same reason as the other path.
-      void awaitKvHydration().then(() => runNavidromeReidIfNeeded());
+      // reachable here too. Synchronous, and BEFORE `fadeOut`: this path fades out
+      // immediately, so anything awaited here would let the splash finish first.
+      void runNavidromeReidIfNeeded();
       fadeOut();
       return;
     }
@@ -301,11 +303,17 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
     },
   });
 
-  // Safety timeout
+  // Safety timeout: a backstop against an ANIMATION that never lands, not against a slow
+  // migration. Held while the chain runs, because a library big enough to take longer than
+  // this would otherwise drop the splash mid-chain — and `_layout` reads the splash going
+  // away as "startup may proceed", launching the app into a half-migrated database and
+  // firing every startup effect before the re-key's interstitial has had a chance to rise.
+  // The chain cannot hang here silently: both arms of `startMigrations` set 'done'.
   useEffect(() => {
+    if (migrationPhase === 'running') return undefined;
     const timeout = setTimeout(complete, SAFETY_TIMEOUT);
     return () => clearTimeout(timeout);
-  }, [complete]);
+  }, [complete, migrationPhase]);
 
   const containerStyle = useAnimatedStyle(() => ({
     opacity: containerOpacity.value,

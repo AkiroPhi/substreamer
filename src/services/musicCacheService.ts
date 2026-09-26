@@ -59,6 +59,7 @@ import {
 } from '../store/persistence/musicCacheTables';
 import { logImageCache } from './imageCacheLogger';
 import { logLibrarySync } from './librarySyncLogger';
+import { shouldBlockContent } from './navidromeReid/reidMarker';
 import { processingOverlayStore } from '../store/processingOverlayStore';
 import { playbackSettingsStore } from '../store/playbackSettingsStore';
 import { resolveEffectiveFormat } from '../utils/effectiveFormat';
@@ -2341,10 +2342,21 @@ async function syncStarredSongsDownload(): Promise<void> {
   const db = getDb();
   if (!db) return;
   if ((await countStarredSongs(db)) === 0) {
-    // Deliberately NOT guarded like the prune path below: a zero count here is the user
-    // unstarring their last track, and deleting the download is the correct response.
-    // The re-key rewrites `favorite_songs` inside one atomic batch and the interstitial
-    // holds the app while it runs, so the count cannot transit zero mid-pass.
+    // A zero count is USUALLY the user unstarring their last track, and deleting the
+    // download is then correct. But `countStarredSongs` reads `songs` + `favorite_songs`,
+    // and the Navidrome re-key DISCARDS both — it stopped re-keying them when the design
+    // changed to let the library sync refill it. So the count does transit zero mid-pass,
+    // and this path deletes the whole starred collection without ever reaching the prune
+    // guard in `syncCachedPlaylistTracks`.
+    //
+    // So refuse while a re-key is outstanding — that is exactly the window in which the
+    // count is meaningless, and it leaves the ordinary last-unstar case untouched. The
+    // next sync repopulates the library and reports a real count.
+    if (shouldBlockContent()) {
+      const held = musicCacheStore.getState().cachedItems[STARRED_SONGS_ITEM_ID]?.songIds.length ?? 0;
+      logLibrarySync(`starred delete refused mid-re-key: count 0 but ${held} songs downloaded`);
+      return;
+    }
     deleteCachedItem(STARRED_SONGS_ITEM_ID);
     return;
   }

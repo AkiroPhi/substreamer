@@ -44,6 +44,12 @@ interface MigrationGateState {
   stages: Partial<Record<MigrationStageId, MigrationStage>>;
   /** Set when the run failed; the screen surfaces a retry rather than hanging. */
   failed: boolean;
+  /**
+   * True once the run has committed a write. A failure BEFORE any write is safe to walk
+   * away from; a failure after one leaves the database re-keyed with files still at their
+   * old paths, and launching into that lets the reconcile delete every download.
+   */
+  hasWritten: boolean;
 
   show: (mode?: MigrationGateMode) => void;
   hide: () => void;
@@ -54,12 +60,15 @@ interface MigrationGateState {
   beginStage: (id: MigrationStageId, total?: number) => void;
   advanceStage: (id: MigrationStageId, done: number) => void;
   fail: () => void;
+  /** Called immediately before the first write of the run. */
+  markWritten: () => void;
   reset: () => void;
 }
 
 const initial = {
   visible: false,
   mode: 'working' as MigrationGateMode,
+  hasWritten: false,
   activeStage: null as MigrationStageId | null,
   stages: {} as Partial<Record<MigrationStageId, MigrationStage>>,
   failed: false,
@@ -87,6 +96,7 @@ export const migrationGateStore = create<MigrationGateState>()((set) => ({
       : { stages: { ...s.stages, [id]: { ...s.stages[id], done } } })),
 
   fail: () => set({ failed: true }),
+  markWritten: () => set({ hasWritten: true }),
   reset: () => set({ ...initial, stages: {} }),
 }));
 

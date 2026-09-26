@@ -77,6 +77,13 @@ export async function discardLibrary(db: InternalDb): Promise<number> {
 
   syncStatusStore.getState().resetLibrarySync();
   syncStatusStore.getState().resetSongSync();
+  // `resetSongSync` already clears `notFoundAlbumIds`, but neither reset touches the
+  // newest-album watermark, and it holds an id the server has retired. Cleared HERE, in
+  // the same breath as the resets, rather than in `reidKv`: that module edits the
+  // persisted blob directly, and these two `set` calls have their own write to the same
+  // key in flight, so whichever landed second won. `dataSyncService` only compares the
+  // watermark for inequality, so a null reads as "changed" and the refill runs anyway.
+  syncStatusStore.setState({ lastKnownNewestAlbumId: null });
 
   return cleared;
 }

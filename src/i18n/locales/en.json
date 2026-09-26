@@ -1124,5 +1124,6 @@
   "migrationAskConfirm": "My server is updated — run it now",
   "migrationAskDefer": "Not yet — remind me later",
   "migrationGateRetry": "Try again",
-  "migrationGateContinueAnyway": "Continue without updating"
+  "migrationGateContinueAnyway": "Continue without updating",
+  "migrationGateMustFinish": "This update has already started and needs to finish. Your downloaded music is safe, but Substreamer can't open until it completes."
 }
