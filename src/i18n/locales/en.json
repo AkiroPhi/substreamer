@@ -1127,8 +1127,9 @@
   "migrationGateContinueAnyway": "Continue without updating",
   "migrationGateMustFinish": "This update has already started and needs to finish. Your downloaded music is safe, but Substreamer can't open until it completes.",
   "migrationCompleteTitle": "All done",
-  "migrationCompleteBody": "Your library has been updated to match your server. Downloads and favourites were carried across.",
+  "migrationCompleteBody": "Your music now matches your server. Downloads, favourites and play history were all carried across.",
   "migrationCompleteContinue": "Continue",
   "migrationPausedTitle": "Update paused",
-  "migrationPausedBody": "Reopen Substreamer to finish updating your library."
+  "migrationPausedBody": "Reopen Substreamer to finish updating your library.",
+  "migrationCompleteNote": "Your library still needs to be resynced, and the artwork for your downloaded music re-fetched. Both happen automatically in the background whenever you are online, so there is nothing to do."
 }

@@ -82,6 +82,17 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
               {t('migrationCompleteBody')}
             </Text>
           </Animated.View>
+          {/* What happens NEXT. The library is empty until the first sync refills it and
+              downloaded artwork is re-fetched on demand, so without this the user meets a
+              sparse library and blank covers right after being told it all worked. */}
+          <Animated.View
+            entering={FadeIn.delay(250)}
+            style={[styles.note, { borderColor: colors.border }]}
+          >
+            <Text style={[styles.noteText, { color: colors.textSecondary }]}>
+              {t('migrationCompleteNote')}
+            </Text>
+          </Animated.View>
           <Animated.View entering={FadeIn.delay(300)} style={styles.completeButtonWrap}>
             <Pressable
               accessibilityRole="button"
@@ -250,6 +261,8 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
 
 const styles = StyleSheet.create({
   tick: { fontSize: 64, lineHeight: 72, textAlign: 'center', marginBottom: 8 },
+  note: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 14, marginTop: 20 },
+  noteText: { fontSize: 13, lineHeight: 19, textAlign: 'center' },
   completeButtonWrap: { alignSelf: 'stretch' },
   root: {
     position: 'absolute',
