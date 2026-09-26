@@ -20,6 +20,7 @@ import { clearPendingScrobbles } from './persistence/pendingScrobbleTable';
 import { clearScrobbles } from './persistence/scrobbleTable';
 import { clearMusicCacheTables } from './musicCacheStore';
 import { teardownMusicCache } from '../services/musicCacheService';
+import { clearImageQueue } from './persistence/imageDownloadQueueTable';
 import { clearImageCache, teardownImageCache } from '../services/imageCacheService';
 import { resetFavoritesSyncFlags } from '../services/favoritesSyncService';
 
@@ -205,6 +206,12 @@ export async function resetAllStores(): Promise<void> {
   // removed isn't re-armed — the next initImageCache comes from the auth
   // flow on re-login.
   void clearImageCache({ reinit: false });
+  // `clearImageCache` drops `cached_images` only, and `image_download_queue` is a KEPT
+  // table, so nothing else empties it. Rows left behind here are resurrected to `queued`
+  // by `resetStalledImageRows` on every later launch and re-fetched against whatever
+  // server is signed in next; worse, the repair queries exclude any cover with a queue
+  // row, so those covers can never be repaired again.
+  void clearImageQueue();
   kvStorage.removeItem('substreamer-image-cache-settings');
   for (const store of allStores) {
     (store.setState as (state: unknown, replace: boolean) => void)(

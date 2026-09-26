@@ -150,6 +150,8 @@ jest.mock('../../store/persistence/imageDownloadQueueTable', () => ({
   resetErrorRowsForCycle: (cycleId: string) => mockResetErrorForCycle(cycleId),
   countImageQueueRowsByCycle: (cycleId: string) => mockCountByCycle(cycleId),
   countImageQueueRowsByStatus: (status: string) => mockCountByStatus(status),
+  countImageQueueRowsByCycleAndStatus: (_cycleId: string, status: string) => mockCountByStatus(status),
+  clearImageQueue: () => Promise.resolve(0),
 }));
 
 // kvStorage — back the meta with an in-test Map.
@@ -500,6 +502,77 @@ describe('recoverStalledImageDownloads', () => {
   it('is a no-op when queue is empty', async () => {
     await recoverStalledImageDownloads();
     expect(mockResetStalled).toHaveBeenCalledTimes(1); // it still calls, just returns 0
+  });
+
+  // The stuck-banner bug: a cycle whose rows are all gone but whose completion write was
+  // lost. Nothing re-checked it, so the banner sat at N/N and every future refresh was
+  // refused, on every launch, forever.
+  it('completes a cycle whose queue is empty', async () => {
+    mockKvStore.set('substreamer-image-queue-meta', JSON.stringify({
+      cycleId: 'cyc-orphan', cycleScope: 'refresh-downloads',
+      cycleTotal: 11, isPaused: false, phase: 'active',
+    }));
+
+    await recoverStalledImageDownloads();
+
+    const meta = JSON.parse(mockKvStore.get('substreamer-image-queue-meta') as string);
+    expect(meta.cycleId).toBeNull();
+    expect(meta.cycleTotal).toBe(0);
+  });
+
+  it('leaves a cycle alone while it still has rows', async () => {
+    mockQueueState.rows.push(
+      { coverArtId: 'cov-a', scope: 'refresh-all', status: 'queued', cycleId: 'cyc-live' },
+    );
+    mockKvStore.set('substreamer-image-queue-meta', JSON.stringify({
+      cycleId: 'cyc-live', cycleScope: 'refresh-all',
+      cycleTotal: 3, isPaused: false, phase: 'active',
+    }));
+
+    await recoverStalledImageDownloads();
+
+    const meta = JSON.parse(mockKvStore.get('substreamer-image-queue-meta') as string);
+    expect(meta.cycleId).toBe('cyc-live');
+  });
+
+  // Revived rows must count as outstanding, or the reset and the completion check
+  // would contradict each other on the same pass.
+  it('does not complete a cycle whose rows were just revived from error', async () => {
+    mockQueueState.rows.push(
+      { coverArtId: 'cov-a', scope: 'refresh-all', status: 'error', cycleId: 'cyc-live' },
+    );
+    mockKvStore.set('substreamer-image-queue-meta', JSON.stringify({
+      cycleId: 'cyc-live', cycleScope: 'refresh-all',
+      cycleTotal: 1, isPaused: false, phase: 'error',
+    }));
+
+    await recoverStalledImageDownloads();
+
+    const meta = JSON.parse(mockKvStore.get('substreamer-image-queue-meta') as string);
+    expect(meta.cycleId).toBe('cyc-live');
+    expect(mockQueueState.rows[0].status).toBe('queued');
+  });
+});
+
+describe('a cycle that enqueues nothing', () => {
+  // cycleTotal 0 hides the banner AND the Cancel button, while still blocking every
+  // future refresh - a permanent block with no user-visible state at all.
+  it('does not open a cycle when every id collided with an existing row', async () => {
+    // The snapshot DOES produce ids, so this reaches the insert; every one of them
+    // already has a row, so `INSERT OR IGNORE` inserts nothing.
+    mockGetAllCachedCoverArtIds.mockReturnValue(['cov-a', 'cov-b']);
+    mockQueueState.rows.push(
+      { coverArtId: 'cov-a', scope: 'refresh-all', status: 'queued', cycleId: 'cyc-old' },
+      { coverArtId: 'cov-b', scope: 'refresh-all', status: 'queued', cycleId: 'cyc-old' },
+    );
+
+    const id = await enqueueImageRefreshCycle('refresh-all');
+
+    expect(mockEnqueueBulk).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueBulk.mock.results[0].value).toBe(0);
+    expect(id).toBeNull();
+    const raw = mockKvStore.get('substreamer-image-queue-meta');
+    expect(raw === undefined || JSON.parse(raw).cycleId === null).toBe(true);
   });
 });
 

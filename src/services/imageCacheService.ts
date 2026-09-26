@@ -64,6 +64,7 @@ import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
 import {
   clearImageQueueByCycle,
   countImageQueueRowsByCycle,
+  countImageQueueRowsByCycleAndStatus,
   countImageQueueRowsByStatus,
   enqueueImagesBulk,
   type ImageDownloadQueueRow,
@@ -2152,8 +2153,13 @@ function readImageQueueMeta(): ImageQueueMeta {
 function writeImageQueueMeta(next: ImageQueueMeta): void {
   try {
     kvStorage.setItem(IMAGE_QUEUE_META_KEY, JSON.stringify(next));
-  } catch {
-    /* swallow — meta loss only affects UI display, not correctness */
+  } catch (e) {
+    // NOT harmless, despite what this used to say. A lost completion write leaves a cycle
+    // open with an empty queue, and `enqueueImageRefreshCycle` then refuses every future
+    // refresh. This is a synchronous JS-thread SQLite write, which can hard-fail while
+    // pool work is outstanding, so it is exactly the write most likely to be lost —
+    // silently, until now.
+    logImageCache(`image-queue: META WRITE FAILED (${e instanceof Error ? e.message : String(e)})`);
   }
 }
 
@@ -2334,10 +2340,17 @@ async function maybeCompleteCycle(): Promise<void> {
   const meta = readImageQueueMeta();
   if (meta.cycleId === null) return;
   const remaining = await countImageQueueRowsByCycle(meta.cycleId);
+  // Re-read after the await and bail if a different cycle started meanwhile, so a check
+  // racing a fresh `enqueueImageRefreshCycle` cannot null out the new cycle's meta.
+  if (readImageQueueMeta().cycleId !== meta.cycleId) return;
   if (remaining === 0) {
     // Every row succeeded → clean complete; banner clears.
     writeImageQueueMeta({ cycleId: null, cycleScope: null, cycleTotal: 0, isPaused: false, phase: 'active' });
     flushAggregateRecalc();
+    // Without this the meta clears but nothing re-reads it, so a banner already on screen
+    // stays at N/N for the rest of the session. `processOneImage` notifies for its own
+    // call; every other caller would not.
+    notifyImageQueueChange();
     logImageCache('image-queue: cycle complete');
     return;
   }
@@ -2345,11 +2358,14 @@ async function maybeCompleteCycle(): Promise<void> {
   // errors. Transition to the dismissible error phase instead of pinning the
   // progress banner at N/N forever. cycleId + the error rows are kept so the
   // cycle-scoped retry and next-boot recovery still work.
-  const errored = await countImageQueueRowsByStatus('error');
+  // Cycle-scoped: the global count would include rows left behind by an earlier cycle,
+  // driving `stillActive` negative and flipping a live cycle to the error phase mid-drain.
+  const errored = await countImageQueueRowsByCycleAndStatus(meta.cycleId, 'error');
   const stillActive = remaining - errored;
   if (stillActive <= 0 && meta.phase === 'active') {
     writeImageQueueMeta({ ...meta, phase: 'error' });
     flushAggregateRecalc();
+    notifyImageQueueChange();
     logImageCache(`image-queue: cycle finished with ${errored} error(s)`);
   }
 }
@@ -2387,6 +2403,11 @@ export async function processImageQueue(): Promise<void> {
       await Promise.all(workers);
     } finally {
       flushAggregateRecalc();
+      // The drain has ended — for completion, pause, connectivity loss or an error. If
+      // the cycle's queue is empty it is finished, and this is the only check that runs
+      // in the SAME session regardless of how the last row left. A cycle with rows
+      // remaining is a no-op here.
+      await maybeCompleteCycle();
     }
   })();
   imageWorkerPromise = promise;
@@ -2415,6 +2436,11 @@ export async function recoverStalledImageDownloads(): Promise<void> {
     logImageCache(`image-queue: recovered ${reset} stalled row(s) to queued`);
     notifyImageQueueChange();
   }
+  // A cycle whose queue is empty is finished, whatever happened to the write that should
+  // have said so. Without this the state persists across every launch — the banner sits
+  // at N/N and `enqueueImageRefreshCycle` refuses every future refresh. Runs AFTER the
+  // reset above, so rows revived from `error`/`downloading` still count as outstanding.
+  await maybeCompleteCycle();
 }
 
 /**
@@ -2555,6 +2581,15 @@ export async function enqueueImageRefreshCycle(
   }
   const cycleId = generateCycleId();
   const inserted = await enqueueImagesBulk(ids, scope, cycleId);
+  if (inserted === 0) {
+    // Every id collided with an existing row (`INSERT OR IGNORE` on the cover_art_id PK).
+    // Opening the cycle anyway would set `cycleId` with `cycleTotal: 0`, which hides the
+    // banner AND the Cancel button while still blocking every future refresh — a
+    // permanent block with no user-visible state at all.
+    logImageCache(`image-queue: ${scope} enqueued 0 new rows, not opening a cycle`);
+    void processImageQueue();
+    return null;
+  }
   writeImageQueueMeta({
     cycleId,
     cycleScope: scope,
