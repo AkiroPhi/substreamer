@@ -40,7 +40,7 @@ import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
 import { kvStorage } from '../../store/persistence';
 import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
-import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../dataModelUpgradeService';
+import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../normalizedMigrationKey';
 import {
   deleteSupersededRows,
   rekeyEmbeddedIds,
@@ -184,12 +184,24 @@ async function execute(): Promise<void> {
     // while the store had just been rehydrated to canonical ones, the zero overlap would
     // tear down the whole starred download.
     const cleared = await discardLibrary(db);
-    // Stamp the blob-to-SQL ETL complete. The pass has just discarded the library that
-    // ETL imports INTO, so leaving it unstamped lets the idle orchestrator re-import
-    // retired ids from the legacy blobs that survive the chain. Imported rather than
-    // copied: the version is meant to be bumped when the ETL gains a step, and a local
-    // copy would go stale silently.
+    // Stamp the blob-to-SQL ETL complete, and PROVE it stuck.
+    //
+    // The pass has just discarded the library that ETL imports into, and the legacy blob
+    // tables survive the migration chain — so if this key is missing afterwards the idle
+    // orchestrator re-imports the entire pre-re-key library on top of the canonical one.
+    // That is the doubled-library bug, and it is silent: `kvStorage.setItem` swallowed
+    // its own failures, so the write could vanish while the pass reported success.
+    //
+    // Read back rather than trust the write. Failing here leaves the marker `pending`,
+    // so the next launch re-runs an idempotent pass — which is strictly better than
+    // completing into a library half in retired ids.
     await kvStorage.setItem(MIGRATION_DONE_KEY, MIGRATION_VERSION);
+    const stamped = await kvStorage.getItem(MIGRATION_DONE_KEY);
+    if (stamped !== MIGRATION_VERSION) {
+      throw new Error(
+        `ETL completion key did not persist (wrote "${MIGRATION_VERSION}", read "${stamped}")`,
+      );
+    }
     logLibrarySync(`[reid] library discarded (${cleared} tables) — one sync will refill it`);
 
     // The KV blobs that survive the migration chain. Done before the stores rehydrate, so

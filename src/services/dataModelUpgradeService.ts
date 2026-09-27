@@ -19,6 +19,7 @@
  */
 import { checkpointWalAsync, migrateBlobsToNormalized } from '@/db/migrateNormalized';
 import { getDb } from '@/store/persistence/db';
+import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from './normalizedMigrationKey';
 import { kvStorage } from '@/store/persistence';
 import { syncStatusStore } from '@/store/syncStatusStore';
 import { migrationChainComplete } from './migrationService';
@@ -28,8 +29,7 @@ import { migrationChainComplete } from './migrationService';
  * VERSIONED rather than a boolean: when the migration gains a step, bump this so
  * already-stamped installs re-run (`migrateBlobsToNormalized` is idempotent upserts)
  * rather than stacking a second migration on top of the first. */
-export const MIGRATION_VERSION = '3';
-export const MIGRATION_DONE_KEY = 'substreamer-normalized-migration-complete';
+export { MIGRATION_DONE_KEY, MIGRATION_VERSION } from './normalizedMigrationKey';
 
 let inFlight: Promise<void> | null = null;
 

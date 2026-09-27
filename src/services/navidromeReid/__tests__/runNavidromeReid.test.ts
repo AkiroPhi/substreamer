@@ -76,8 +76,18 @@ jest.mock('../../../store/ratingStore', () => ({
 jest.mock('../../../store/syncStatusStore', () => ({
   syncStatusStore: { persist: { rehydrate: () => Promise.resolve() } },
 }));
+// A KV that can be told to silently drop writes, which is what `kvStorage.setItem` did
+// for real: it swallowed its own exception, so a lost stamp looked like success.
+let mockKvDropWrites = false;
+const mockKv = new Map<string, string>();
 jest.mock('../../../store/persistence', () => ({
-  kvStorage: { setItem: () => Promise.resolve() },
+  kvStorage: {
+    setItem: (k: string, v: string) => {
+      if (!mockKvDropWrites) mockKv.set(k, v);
+      return Promise.resolve();
+    },
+    getItem: (k: string) => Promise.resolve(mockKv.get(k) ?? null),
+  },
 }));
 jest.mock('../../librarySyncLogger', () => ({
   logLibrarySync: jest.fn(),
@@ -97,6 +107,8 @@ beforeEach(() => {
   mockFileResult = { moved: 44, missing: 0, failed: 0 };
   mockVerdict = 'run';
   mockSetReidState.mockClear();
+  mockKv.clear();
+  mockKvDropWrites = false;
   migrationGateStore.getState().reset();
 });
 
@@ -180,3 +192,26 @@ describe('the pass refuses to write when it should', () => {
     expect(migrationGateStore.getState().mode).toBe('asking');
   });
 });
+
+describe('the blob-ETL completion stamp', () => {
+  // The library is discarded here but the legacy blob tables survive the migration
+  // chain, so this key is the only thing stopping the idle ETL re-importing the whole
+  // pre-re-key library on top of the canonical one - the doubled-library bug.
+  it('stamps the ETL complete before finishing', async () => {
+    await runNavidromeReidIfNeeded();
+    expect(mockKv.get('substreamer-normalized-migration-complete')).toBe('3');
+    expect(mockCalls).toContain('setReidState:complete');
+  });
+
+  it('FAILS the pass when the stamp does not persist', async () => {
+    mockKvDropWrites = true;
+
+    await runNavidromeReidIfNeeded();
+
+    // Completing here would let the ETL double the library, silently. Better to fail and
+    // re-run an idempotent pass next launch.
+    expect(mockCalls).not.toContain('setReidState:complete');
+    expect(migrationGateStore.getState().failed).toBe(true);
+  });
+});
+

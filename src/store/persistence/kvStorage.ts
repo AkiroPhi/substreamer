@@ -2,6 +2,24 @@ import { type StateStorage } from 'zustand/middleware';
 
 import { getDb, kvFallback } from './db';
 
+/**
+ * Report a dropped KV write instead of swallowing it.
+ *
+ * These used to be silent on the grounds that "persistence dropped this write; nothing
+ * else to do". That is false for any key another decision reads back: the Navidrome
+ * re-key stamps the blob-ETL's completion key here, and when that write vanished the ETL
+ * re-imported a whole legacy library on top of the current one — with no error anywhere,
+ * because of this catch. Also logs the VALUE's type: a binding that resolved `undefined`
+ * throws here, and the type is what identifies it.
+ */
+function warnWriteFailed(op: string, key: string, value: unknown, e: unknown): void {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[kvStorage] ${op} FAILED key=${key} valueType=${typeof value} `
+    + `value=${String(value).slice(0, 40)} err=${e instanceof Error ? e.message : String(e)}`,
+  );
+}
+
 // Fires once per process the first time any kvStorage operation falls back
 // to the in-memory Map. `db.ts` already logs at init time, but that warn is
 // silent w.r.t. *when* writes are actually being dropped — this surface
@@ -68,8 +86,8 @@ export const kvStorageSync: StateStorage = {
         'INSERT OR REPLACE INTO storage (key, value) VALUES (?, ?);',
         [key, value],
       );
-    } catch {
-      /* persistence dropped this write; nothing else to do */
+    } catch (e) {
+      warnWriteFailed('setItem', key, value, e);
     }
   },
   removeItem(key: string): void {
@@ -81,8 +99,8 @@ export const kvStorageSync: StateStorage = {
     }
     try {
       db.runSync('DELETE FROM storage WHERE key = ?;', [key]);
-    } catch {
-      /* dropped */
+    } catch (e) {
+      warnWriteFailed('removeItem', key, '', e);
     }
   },
 };
@@ -130,8 +148,8 @@ export const kvStorage: StateStorage = {
         'INSERT OR REPLACE INTO storage (key, value) VALUES (?, ?);',
         [key, value],
       );
-    } catch {
-      /* persistence dropped this write; nothing else to do */
+    } catch (e) {
+      warnWriteFailed('setItem', key, value, e);
     }
   },
   async removeItem(key: string): Promise<void> {
@@ -143,8 +161,8 @@ export const kvStorage: StateStorage = {
     }
     try {
       await db.runAsync('DELETE FROM storage WHERE key = ?;', [key]);
-    } catch {
-      /* dropped */
+    } catch (e) {
+      warnWriteFailed('removeItem', key, '', e);
     }
   },
 };
