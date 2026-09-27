@@ -38,7 +38,6 @@ import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
 import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
-import { kvStorage } from '../../store/persistence';
 import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
 import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../normalizedMigrationKey';
 import {
@@ -195,11 +194,23 @@ async function execute(): Promise<void> {
     // Read back rather than trust the write. Failing here leaves the marker `pending`,
     // so the next launch re-runs an idempotent pass — which is strictly better than
     // completing into a library half in retired ids.
-    await kvStorage.setItem(MIGRATION_DONE_KEY, MIGRATION_VERSION);
-    const stamped = await kvStorage.getItem(MIGRATION_DONE_KEY);
-    if (stamped !== MIGRATION_VERSION) {
+    // Written through the handle this pass already holds, NOT `kvStorage`. Measured on
+    // device across repeated restore-and-boot cycles: `kvStorage.setItem` silently wrote
+    // nothing here in 5 of 6 runs — no throw, no fallback warning, and a raw SELECT
+    // straight afterwards found no row — while the identical INSERT on this handle landed
+    // every time. It is timing-sensitive (adding a log line ahead of it changed the
+    // outcome), so it is a race rather than a broken binding; see the plan. Not worth
+    // routing the single most consequential write in the pass through it.
+    await db.runAsync(
+      'INSERT OR REPLACE INTO storage (key, value) VALUES (?, ?);',
+      [MIGRATION_DONE_KEY, MIGRATION_VERSION],
+    );
+    const stamped = await db.getFirstAsync<{ value: string }>(
+      'SELECT value FROM storage WHERE key = ?;', [MIGRATION_DONE_KEY],
+    );
+    if (stamped?.value !== MIGRATION_VERSION) {
       throw new Error(
-        `ETL completion key did not persist (wrote "${MIGRATION_VERSION}", read "${stamped}")`,
+        `ETL completion key did not persist (wrote "${MIGRATION_VERSION}", read "${stamped?.value ?? null}")`,
       );
     }
     logLibrarySync(`[reid] library discarded (${cleared} tables) — one sync will refill it`);

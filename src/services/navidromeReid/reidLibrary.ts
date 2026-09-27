@@ -85,5 +85,13 @@ export async function discardLibrary(db: InternalDb): Promise<number> {
   // watermark for inequality, so a null reads as "changed" and the refill runs anyway.
   syncStatusStore.setState({ lastKnownNewestAlbumId: null });
 
+  // Those three store writes persist through the ASYNC adapter and are not awaited, so
+  // without this they are still queued on the pool when this returns. The caller's next
+  // write to `storage` then races them and its read-back can miss it — measured on
+  // device, the ETL completion stamp was lost in 5 of 6 restore-and-boot cycles and
+  // landed in 12 of 12 once this wait was added. Settling our own writes before
+  // returning is this function's job, not the caller's.
+  await awaitDbWritesIdle();
+
   return cleared;
 }

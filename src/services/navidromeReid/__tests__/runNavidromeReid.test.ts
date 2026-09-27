@@ -10,12 +10,26 @@ const record = <T>(name: string, value?: T) => () => {
   return Promise.resolve(value);
 };
 
+// The `storage` table, so the ETL stamp can be written and read back the way the pass
+// really does it - through the db handle, not kvStorage.
+const mockStorage = new Map<string, string>();
+let mockStorageDropWrites = false;
 jest.mock('../../../store/persistence/db', () => ({
   getDb: () => ({
-    runAsync: (sql: string) => {
+    runAsync: (sql: string, params?: unknown[]) => {
       if (sql.includes('queue_snapshots')) mockCalls.push('clearLiveQueue');
       if (sql.includes('download_queue')) mockCalls.push('clearDownloadQueue');
+      if (sql.includes('INTO storage') && !mockStorageDropWrites) {
+        mockStorage.set(String(params?.[0]), String(params?.[1]));
+      }
       return Promise.resolve({ changes: 0 });
+    },
+    getFirstAsync: (sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM storage')) {
+        const v = mockStorage.get(String(params?.[0]));
+        return Promise.resolve(v === undefined ? null : { value: v });
+      }
+      return Promise.resolve(null);
     },
   }),
 }));
@@ -76,18 +90,8 @@ jest.mock('../../../store/ratingStore', () => ({
 jest.mock('../../../store/syncStatusStore', () => ({
   syncStatusStore: { persist: { rehydrate: () => Promise.resolve() } },
 }));
-// A KV that can be told to silently drop writes, which is what `kvStorage.setItem` did
-// for real: it swallowed its own exception, so a lost stamp looked like success.
-let mockKvDropWrites = false;
-const mockKv = new Map<string, string>();
 jest.mock('../../../store/persistence', () => ({
-  kvStorage: {
-    setItem: (k: string, v: string) => {
-      if (!mockKvDropWrites) mockKv.set(k, v);
-      return Promise.resolve();
-    },
-    getItem: (k: string) => Promise.resolve(mockKv.get(k) ?? null),
-  },
+  kvStorage: { setItem: () => Promise.resolve(), getItem: () => Promise.resolve(null) },
 }));
 jest.mock('../../librarySyncLogger', () => ({
   logLibrarySync: jest.fn(),
@@ -107,8 +111,8 @@ beforeEach(() => {
   mockFileResult = { moved: 44, missing: 0, failed: 0 };
   mockVerdict = 'run';
   mockSetReidState.mockClear();
-  mockKv.clear();
-  mockKvDropWrites = false;
+  mockStorage.clear();
+  mockStorageDropWrites = false;
   migrationGateStore.getState().reset();
 });
 
@@ -199,12 +203,12 @@ describe('the blob-ETL completion stamp', () => {
   // pre-re-key library on top of the canonical one - the doubled-library bug.
   it('stamps the ETL complete before finishing', async () => {
     await runNavidromeReidIfNeeded();
-    expect(mockKv.get('substreamer-normalized-migration-complete')).toBe('3');
+    expect(mockStorage.get('substreamer-normalized-migration-complete')).toBe('3');
     expect(mockCalls).toContain('setReidState:complete');
   });
 
   it('FAILS the pass when the stamp does not persist', async () => {
-    mockKvDropWrites = true;
+    mockStorageDropWrites = true;
 
     await runNavidromeReidIfNeeded();
 
