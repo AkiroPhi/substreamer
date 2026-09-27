@@ -66,7 +66,7 @@ import type { AlbumID3, Child } from 'subsonic-api';
 import { kvStorage, clearKvStorage } from '../persistence';
 import { getDb, __setDbForTests } from '../persistence/db';
 import { awaitDbWritesIdle } from '../../db/client';
-import { ensureNormalizedSchema } from '../../db/createNormalizedTables';
+import { KEPT_TABLES, ensureNormalizedSchema } from '../../db/createNormalizedTables';
 import {
   markStarredSongs,
   replaceFavoriteAlbums,
@@ -250,3 +250,48 @@ describe('resetAllStores', () => {
     processingOverlayStore.getState().hide();
   });
 });
+
+describe('the KEPT-table sweep', () => {
+  // KEPT_TABLES means "survives a full resync", NOT "survives logout" — logging out is
+  // how you switch user or server. The sweep is derived from the list because the
+  // hand-written per-table teardown is exactly how image_download_queue was missed: its
+  // rows were revived to `queued` every launch and refetched against the next server.
+  it('empties a kept table that no per-table teardown call covers', async () => {
+    const handle = getDb()!;
+    await handle.runAsync(
+      'INSERT INTO image_download_queue (cover_art_id, scope, status, attempts, added_at, cycle_id)'
+      + " VALUES ('al-retired_69eaaaa1', 'refresh-downloads', 'queued', 0, 0, 'cyc-old');",
+    );
+    const before = await handle.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM image_download_queue',
+    );
+    expect(before?.n).toBe(1);
+
+    await resetAllStores();
+
+    const after = await handle.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM image_download_queue',
+    );
+    expect(after?.n).toBe(0);
+  });
+
+  it('leaves no rows in ANY kept table', async () => {
+    const handle = getDb()!;
+    await handle.runAsync(
+      'INSERT INTO image_download_queue (cover_art_id, scope, status, attempts, added_at, cycle_id)'
+      + " VALUES ('al-x_1', 'refresh-all', 'queued', 0, 0, 'cyc-1');",
+    );
+    await handle.runAsync("INSERT INTO storage (key, value) VALUES ('leftover', 'x');");
+
+    await resetAllStores();
+
+    for (const table of KEPT_TABLES) {
+      // eslint-disable-next-line no-await-in-loop
+      const row = await handle.getFirstAsync<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM "${table}"`,
+      ).catch(() => ({ n: 0 }));
+      expect({ table, n: row?.n ?? 0 }).toEqual({ table, n: 0 });
+    }
+  });
+});
+

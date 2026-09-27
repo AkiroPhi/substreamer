@@ -14,13 +14,12 @@ import {
 } from './persistence';
 import { getDb } from './persistence/db';
 import { awaitDbWritesIdle } from '../db/client';
-import { resetNormalizedSchema } from '../db/createNormalizedTables';
+import { KEPT_TABLES, resetNormalizedSchema } from '../db/createNormalizedTables';
 import { dropIdMap } from '../services/navidromeReid/reidMap';
 import { clearPendingScrobbles } from './persistence/pendingScrobbleTable';
 import { clearScrobbles } from './persistence/scrobbleTable';
 import { clearMusicCacheTables } from './musicCacheStore';
 import { teardownMusicCache } from '../services/musicCacheService';
-import { clearImageQueue } from './persistence/imageDownloadQueueTable';
 import { clearImageCache, teardownImageCache } from '../services/imageCacheService';
 import { resetFavoritesSyncFlags } from '../services/favoritesSyncService';
 
@@ -147,6 +146,40 @@ async function clearLegacyBlobTables(): Promise<void> {
   }
 }
 
+/**
+ * Empty every KEPT table, derived from the list itself.
+ *
+ * `KEPT_TABLES` means "survives a full resync", NOT "survives logout" — logging out is
+ * how you switch user or server, so none of this belongs to the next account. Only the
+ * on-disk backup files outlive it, by design: they carry data across accounts and servers
+ * with the user choosing what to restore.
+ *
+ * Derived rather than a hand-written list of per-table calls, because that list is how
+ * `image_download_queue` was missed: it was added to `KEPT_TABLES` and never to logout,
+ * so its rows were revived to `queued` on every later launch and refetched against
+ * whichever server signed in next. A table added tomorrow is swept by this automatically.
+ *
+ * Deferred FKs because the sweep spans parents and their children in one batch.
+ */
+async function clearKeptTables(): Promise<void> {
+  const db = getDb();
+  if (db === null) return;
+  const present = new Set(
+    (await db.getAllAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    )).map((r) => r.name),
+  );
+  const commands: Array<[string, unknown[]]> = [['PRAGMA defer_foreign_keys = ON', []]];
+  for (const table of KEPT_TABLES) {
+    if (present.has(table)) commands.push([`DELETE FROM "${table}"`, []]);
+  }
+  try {
+    await db.runAtomicBatchAsync(commands as never);
+  } catch (e) {
+    console.warn('[resetAllStores] kept-table sweep failed:', e);
+  }
+}
+
 export async function resetAllStores(): Promise<void> {
   // (Native SSL trust + proxy teardown happens in the logout handler, awaited
   // before this runs — see AccountCard.handleLogout.)
@@ -206,12 +239,6 @@ export async function resetAllStores(): Promise<void> {
   // removed isn't re-armed — the next initImageCache comes from the auth
   // flow on re-login.
   void clearImageCache({ reinit: false });
-  // `clearImageCache` drops `cached_images` only, and `image_download_queue` is a KEPT
-  // table, so nothing else empties it. Rows left behind here are resurrected to `queued`
-  // by `resetStalledImageRows` on every later launch and re-fetched against whatever
-  // server is signed in next; worse, the repair queries exclude any cover with a queue
-  // row, so those covers can never be repaired again.
-  void clearImageQueue();
   kvStorage.removeItem('substreamer-image-cache-settings');
   for (const store of allStores) {
     (store.setState as (state: unknown, replace: boolean) => void)(
@@ -225,4 +252,9 @@ export async function resetAllStores(): Promise<void> {
   // mid-function — dropping last cancels both any pre-existing pending writes
   // and the ones the resets just armed, so nothing lands after clearKvStorage.
   dropAllPendingPersistWrites();
+
+  // Last: the derived backstop. The targeted teardown above also clears in-memory and
+  // on-disk state, so it stays; this only guarantees no KEPT table keeps rows, whatever
+  // was or was not remembered there.
+  await clearKeptTables();
 }

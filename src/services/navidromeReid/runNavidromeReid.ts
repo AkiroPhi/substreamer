@@ -32,6 +32,7 @@ import { rebuildTrackMaps } from '../musicCacheService';
 import { rehydrateAllStores } from '../../store/persistence/rehydrate';
 import { ratingStore } from '../../store/ratingStore';
 import { syncStatusStore } from '../../store/syncStatusStore';
+import { clearImageQueue } from '../../store/persistence/imageDownloadQueueTable';
 import { getDb } from '../../store/persistence/db';
 import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
@@ -134,6 +135,12 @@ async function execute(): Promise<void> {
     // Only now that we know there IS work. Clearing these above the early exit destroyed
     // the saved queue and every queued download for anyone already canonical — a fresh
     // sign-in on 0.64, or anyone who had re-synced.
+    //
+    // The IMAGE queue goes with them, and up here rather than in `refreshArtwork`: every
+    // row in it names a retired id, and `cancelImageRefreshCycle` only drops rows of the
+    // ACTIVE cycle, so anything queued outside one would survive and be retried against
+    // ids the server no longer has. Clearing before the cache is cleared also means the
+    // re-warm enqueues into an empty queue, so none of its ids collide.
     // From here on the run writes. A failure after this point cannot be walked away from:
     // the database ends up re-keyed with files still at their old paths, and launching the
     // app into that lets `reconcileMusicCacheAsync` delete every download as an orphan.
@@ -141,6 +148,7 @@ async function execute(): Promise<void> {
 
     await clearLiveQueue(db);
     await clearDownloadQueue(db);
+    await clearImageQueue();
 
     gate.beginStage('updatingDownloads');
     await rekeyPlainColumns(db);

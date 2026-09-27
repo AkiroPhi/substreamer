@@ -185,10 +185,14 @@ export const MODEL_TABLES: readonly string[] = [
 ];
 
 /**
- * Permanent user data that lives in schema.ts for ordered schema management but must
- * NEVER be dropped by logout or a full resync. Losing any of these means losing the
- * login, the downloads (leaving orphaned files on disk), the listening history or the
- * image cache.
+ * Local data with no server copy: it survives a full RESYNC, which rebuilds the
+ * server-owned model around it. Losing any of these means losing the login, the downloads
+ * (leaving orphaned files on disk), the listening history or the image cache.
+ *
+ * NOT "survives logout". Logout means switching user or server, so every one of these is
+ * emptied then — see `resetAllStores`, which sweeps this list. The only thing that
+ * outlives a logout is the backup files on disk, which exist precisely to carry data
+ * across accounts and servers with the user choosing what to restore.
  */
 export const KEPT_TABLES: readonly string[] = [
   'storage',
