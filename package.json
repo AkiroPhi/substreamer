@@ -28,7 +28,8 @@
     "reset-changelog": "node scripts/reset-store-changelog.js",
     "terminal-log": "script -a /tmp/claude-terminal.txt",
     "rebase": "git fetch origin && git rebase origin/master",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "local-ci": "node scripts/local-ci.js"
   },
   "dependencies": {
     "@formatjs/intl-datetimeformat": "^7.4.9",

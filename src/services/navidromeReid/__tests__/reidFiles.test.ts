@@ -71,7 +71,10 @@ const dbWith = (rows: Row[]): any => ({
   getFirstAsync: () => Promise.resolve({ n: rows.length }),
   getAllAsync: (_sql: string, [after, limit]: [string, number]) =>
     Promise.resolve(
-      [...rows].sort((a, b) => a.song_id.localeCompare(b.song_id))
+      // Plain binary compare, matching SQLite's default BINARY collation on the real
+      // `ORDER BY song_id` — a locale-aware compare would order ids differently from
+      // the query this stands in for, and is banned besides.
+      [...rows].sort((a, b) => (a.song_id < b.song_id ? -1 : a.song_id > b.song_id ? 1 : 0))
         .filter((r) => r.song_id > after).slice(0, limit),
     ),
 });
