@@ -46,39 +46,39 @@ describe('runAtomicBatchAsync', () => {
     conn.raw.close();
   });
 
-  it('issues BOTH batches SYNCHRONOUSLY so nothing can be queued between them', async () => {
+  it('issues exactly ONE batch, so nothing of its own can roll a later write back', async () => {
     const conn = freshDb();
     const spy = jest.spyOn(conn.raw, 'executeBatch');
 
     void conn.db.runAtomicBatchAsync([['INSERT INTO t VALUES (?)', ['a']]]);
 
-    // No await above: the batch must already be on the pool (the pipelining caller
-    // `bulkUpsert` derives its next chunk before this one would otherwise land), and
-    // the recovery must be on it too — one JS thread means nothing can be issued
-    // between two synchronous calls, so there is no window to be captured by.
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect((spy.mock.calls[1][0] as SQLBatchTuple[]).map((c) => c[0])).toEqual([
-      'ROLLBACK TO op_batch',
-      'RELEASE op_batch',
-    ]);
-    // Both are still parked on the lock — close underneath them and they run against a
-    // closed connection, in whichever test happens to be running by then.
+    // No await: the batch must already be issued, because the pipelining caller
+    // `bulkUpsert` derives its next chunk before this one would otherwise land.
+    // Exactly one — a second "recovery" batch used to follow, and on the success path
+    // its failing ROLLBACK TO made op-SQLite's wrapper fire a real ROLLBACK, discarding
+    // whatever any other caller had written in the meantime.
+    expect(spy).toHaveBeenCalledTimes(1);
     await settleDbWrites();
     conn.raw.close();
   });
 
-  it('enqueues the recovery even when the batch SUCCEEDS, and it undoes nothing', async () => {
+  it('keeps a write issued alongside an un-awaited batch', async () => {
     const conn = freshDb();
-    const spy = jest.spyOn(conn.raw, 'executeBatch');
 
-    await conn.db.runAtomicBatchAsync([['INSERT INTO t VALUES (?)', ['a']]]);
+    // The shape that lost the write on device: the batch is NOT awaited, so the
+    // follow-up write is issued while the batch's dispatch is still pending.
+    //
+    // This asserts the contract, it does NOT reproduce the bug — better-sqlite3 applies
+    // synchronously, so the adapter cannot recreate the interleaving where a second
+    // batch's ROLLBACK lands between these two. The structural guard is the
+    // "exactly ONE batch" test above; the behavioural evidence is device cycles
+    // (5 of 5 lost the write with the recovery batch, 7 of 7 kept it without).
+    const batch = conn.db.runAtomicBatchAsync([['INSERT INTO t VALUES (?)', ['batched']]]);
+    await conn.db.runAsync('INSERT INTO t VALUES (?)', ['after']);
+    await batch;
+    await settleDbWrites();
 
-    // The successful batch already released the savepoint, so the recovery's
-    // `ROLLBACK TO` fails with "no such savepoint" — expected, swallowed, and the row
-    // stays committed. Moving the recovery back under the `catch` would pass every
-    // other test in this file and silently reopen the window.
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(ids(conn)).toEqual(['a']);
+    expect(ids(conn)).toEqual(['after', 'batched']);
     conn.raw.close();
   });
 
@@ -107,9 +107,10 @@ describe('runAtomicBatchAsync', () => {
 
     // The DELETE and the INSERT both ran before the failure; only a real ROLLBACK TO
     // can put the previous row back.
+    // Atomicity comes from op-SQLite's own BEGIN/COMMIT/ROLLBACK wrapper, not from any
+    // scaffolding of ours: one batch in, nothing half-applied.
     expect(ids(conn)).toEqual(['keep']);
-    const recovery = spy.mock.calls[1][0] as SQLBatchTuple[];
-    expect(recovery.map((c) => c[0])).toEqual(['ROLLBACK TO op_batch', 'RELEASE op_batch']);
+    expect(spy).toHaveBeenCalledTimes(1);
     conn.raw.close();
   });
 

@@ -194,13 +194,10 @@ async function execute(): Promise<void> {
     // Read back rather than trust the write. Failing here leaves the marker `pending`,
     // so the next launch re-runs an idempotent pass — which is strictly better than
     // completing into a library half in retired ids.
-    // Written through the handle this pass already holds, NOT `kvStorage`. Measured on
-    // device across repeated restore-and-boot cycles: `kvStorage.setItem` silently wrote
-    // nothing here in 5 of 6 runs — no throw, no fallback warning, and a raw SELECT
-    // straight afterwards found no row — while the identical INSERT on this handle landed
-    // every time. It is timing-sensitive (adding a log line ahead of it changed the
-    // outcome), so it is a race rather than a broken binding; see the plan. Not worth
-    // routing the single most consequential write in the pass through it.
+    // Written through the handle this pass already holds rather than `kvStorage`, purely
+    // so the read-back below uses the same path as the write. Both worked once the real
+    // cause was fixed — the recovery batch in `runAtomicBatchAsync` was rolling this write
+    // back (see `db/client.ts`), which is why it failed through either route.
     await db.runAsync(
       'INSERT OR REPLACE INTO storage (key, value) VALUES (?, ?);',
       [MIGRATION_DONE_KEY, MIGRATION_VERSION],

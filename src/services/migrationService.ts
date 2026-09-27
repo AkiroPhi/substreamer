@@ -9,6 +9,7 @@
  * See the bottom of this file for a template showing how to add new tasks.
  */
 
+import { awaitDbWritesIdle } from '../db/client';
 import { Directory, File, Paths } from 'expo-file-system';
 import { errMessage } from '../utils/errorMessage';
 import { listDirectoryAsync } from 'expo-async-fs';
@@ -2336,7 +2337,14 @@ export async function runMigrations(
     onProgress?.(task);
     lines.push(`--- Task ${task.id}: ${task.name} ---`);
     try {
+      // Quiesce between tasks. Five tasks use `withTransactionSync`, whose JS-thread
+      // BEGIN is a hard error on Android while a pool transaction is open — and op-SQLite
+      // opens one around every `executeBatch`, including any a previous task or the
+      // image drain left in flight. It also means "task N completed" is recorded with no
+      // write of task N still on the wire.
+      await awaitDbWritesIdle();
       await task.run((msg) => lines.push(msg));
+      await awaitDbWritesIdle();
       completedVersion = task.id;
       lines.push('');
     } catch (e) {

@@ -151,13 +151,26 @@ function makeDb(bs: Database.Database, dbPath: string): DB {
     // commands, which `run()` routes through `bs.exec` — so it is modelled faithfully.
     executeBatch: (commands: SQLBatchTuple[]) =>
       onTransactionLock(async () => {
+        // Bracketed in BEGIN/COMMIT, with ROLLBACK on failure, because op-SQLite's JS
+        // wrapper does exactly that around every `executeBatch`
+        // (`op-sqlite/src/functions.ts:95-131`) — the native layer's autocommit is not
+        // what callers actually observe. Without this the adapter made a batch
+        // non-atomic, so the app's own SAVEPOINT+recovery scaffolding looked load-bearing
+        // in tests while on device it was the thing rolling other callers' writes back.
+        bs.exec('BEGIN TRANSACTION');
         let rowsAffected = 0;
-        for (const [query, params] of commands) {
-          if (Array.isArray(params) && Array.isArray(params[0])) {
-            for (const p of params as Scalar[][]) rowsAffected += run(query, p).rowsAffected;
-          } else {
-            rowsAffected += run(query, params as Scalar[] | undefined).rowsAffected;
+        try {
+          for (const [query, params] of commands) {
+            if (Array.isArray(params) && Array.isArray(params[0])) {
+              for (const p of params as Scalar[][]) rowsAffected += run(query, p).rowsAffected;
+            } else {
+              rowsAffected += run(query, params as Scalar[] | undefined).rowsAffected;
+            }
           }
+          bs.exec('COMMIT');
+        } catch (e) {
+          bs.exec('ROLLBACK');
+          throw e;
         }
         fireReactive();
         return { rowsAffected };

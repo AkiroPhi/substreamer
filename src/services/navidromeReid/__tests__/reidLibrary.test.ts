@@ -39,16 +39,8 @@ describe('discardLibrary', () => {
     expect(cleared).not.toContain('mbid_overrides');
   });
 
-  // The store resets persist through the ASYNC adapter and are NOT awaited, so returning
-  // here with them still queued let the caller's next write to `storage` race them — the
-  // ETL stamp was lost in 5 of 6 device cycles until this wait was added.
-  it('settles its own queued writes before returning', async () => {
+  it('quiesces the pool before its batch, so a stranded savepoint cannot fail it', async () => {
     await discardLibrary(db);
-
-    const idle = mockCalls.lastIndexOf('awaitDbWritesIdle');
-    expect(idle).toBeGreaterThan(mockCalls.indexOf('resetLibrarySync'));
-    expect(idle).toBeGreaterThan(mockCalls.indexOf('resetSongSync'));
-    expect(idle).toBeGreaterThan(mockCalls.indexOf('setState'));
-    expect(idle).toBe(mockCalls.length - 1);
+    expect(mockCalls.indexOf('awaitDbWritesIdle')).toBeLessThan(mockCalls.indexOf('batch'));
   });
 });

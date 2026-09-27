@@ -27,6 +27,7 @@ import {
   runMigrations,
 } from '../services/migrationService';
 import { rehydrateAllStores } from '../store/persistence/rehydrate';
+import { isReidRequired } from '../services/navidromeReid/reidMarker';
 import { probeServerVersion } from '../services/navidromeReid/reidProbe';
 import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
@@ -149,7 +150,14 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // `_layout` effect independently AWAITS rehydration before
           // `onStartup()` — that is the authoritative ordering gate against
           // the "full library resync" banner.
-          void rehydrateAllStores();
+          //
+          // SKIPPED when the re-key is about to run. Twelve stores hydrating
+          // concurrently, chunked across timer yields, comfortably outlives the version
+          // probe and would read `cached_songs` and `favorite_songs` WHILE the pass is
+          // rewriting their ids — landing a mixture of retired and canonical ids in
+          // memory, some of it through the SYNC adapter. The pass does its own
+          // `rehydrateAllStores()` at the end, once the ids have settled.
+          if (!isReidRequired()) void rehydrateAllStores();
           // The chain has finished, which is the only moment the re-key can trust the
           // schema. Deliberately NOT keyed off the splash finishing: the safety timeout
           // fires that unconditionally, mid-migration on any large library.
