@@ -10,7 +10,14 @@
 import { connectivityStore } from '../../store/connectivityStore';
 import { offlineModeStore } from '../../store/offlineModeStore';
 import { getApi } from '../subsonicService';
-import { currentServerInfo, isReidComplete, markProbeSettled, setProbedVersion } from './reidMarker';
+import {
+  currentServerInfo,
+  hasServerAnswered,
+  isReidComplete,
+  markProbeSettled,
+  markServerAnswered,
+  setProbedVersion,
+} from './reidMarker';
 
 /**
  * Cap on the probe. Comfortably under the splash's 15s backstop
@@ -53,7 +60,13 @@ export function cannotAskNow(): boolean {
 
 export function probeServerVersion(): Promise<void> | null {
   if (probeInFlight) return probeInFlight;
-  if (probeDone) return null;
+  // Done ONLY counts when the server actually answered. A timeout also settles — that is
+  // deliberate, so an unreachable server cannot block library writes forever — but it
+  // must stay RETRYABLE, or one 4s timeout freezes the whole session: no re-probe, the
+  // pass permanently refused, and the car served nothing. The probe's budget is tighter
+  // than connectivityService's own 5s ping, so a server answering in 4.5s is alive and
+  // syncable and would otherwise be locked out until relaunch.
+  if (probeDone && hasServerAnswered()) return null;
 
   // Decided synchronously, and `null` means "nothing to wait for". Only the population
   // whose answer could change pays for a request, or for a deferred splash: a completed
@@ -87,6 +100,11 @@ export function probeServerVersion(): Promise<void> | null {
       if (!api) { unaskable = true; return; }
 
       const response = await withTimeout(api.ping(), PROBE_TIMEOUT_MS);
+      // ANY well-formed envelope proves the server is there — including `status:
+      // 'failed'`, which is how a Subsonic-level error (bad auth, code 40) arrives over
+      // HTTP 200. Treating only 'ok' as an answer would block library writes for the
+      // whole session on an auth error against a server that plainly exists.
+      if (response?.status !== undefined) markServerAnswered();
       // `serverVersion` only exists on the OpenSubsonic variant of the response, so it is
       // narrowed the same way `fetchServerInfo` does (`subsonicService.ts:944-948`).
       if (response?.status === 'ok' && 'serverVersion' in response

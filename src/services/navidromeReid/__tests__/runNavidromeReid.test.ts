@@ -72,9 +72,12 @@ jest.mock('../reidLibrary', () => ({
 let mockCannotAsk = false;
 jest.mock('../reidProbe', () => ({ cannotAskNow: () => mockCannotAsk }));
 
+let mockServerAnswered = true;
+
 let mockVerdict = 'run';
 const mockSetReidState = jest.fn((s: string) => mockCalls.push(`setReidState:${s}`));
 jest.mock('../reidMarker', () => ({
+  hasServerAnswered: () => mockServerAnswered,
   reidVerdict: () => mockVerdict,
   setReidState: (s: string) => mockSetReidState(s),
   setUserConfirmedReid: jest.fn(),
@@ -95,12 +98,19 @@ jest.mock('../../../store/syncStatusStore', () => ({
 jest.mock('../../../store/persistence', () => ({
   kvStorage: { setItem: () => Promise.resolve(), getItem: () => Promise.resolve(null) },
 }));
+const mockLog = jest.fn();
 jest.mock('../../librarySyncLogger', () => ({
-  logLibrarySync: jest.fn(),
+  logLibrarySync: (m: string) => mockLog(m),
   flushLibrarySyncLog: () => Promise.resolve(),
 }));
+let mockEtlInFlight: Promise<void> | null = null;
 jest.mock('../../dataModelUpgradeService', () => ({
-  MIGRATION_DONE_KEY: 'k', MIGRATION_VERSION: '3',
+  MIGRATION_DONE_KEY: 'k',
+  MIGRATION_VERSION: '3',
+  dataModelUpgradeInFlight: () => {
+    if (mockEtlInFlight) mockCalls.push('awaitEtl');
+    return mockEtlInFlight;
+  },
 }));
 
 import { migrationGateStore } from '../../../store/migrationGateStore';
@@ -113,6 +123,9 @@ beforeEach(() => {
   mockFileResult = { moved: 44, missing: 0, failed: 0 };
   mockVerdict = 'run';
   mockCannotAsk = false;
+  mockServerAnswered = true;
+  mockEtlInFlight = null;
+  mockLog.mockClear();
   mockSetReidState.mockClear();
   mockStorage.clear();
   mockStorageDropWrites = false;
@@ -257,12 +270,77 @@ describe('without a server to refill from', () => {
     expect(migrationGateStore.getState().visible).toBe(false);
   });
 
+
+  // The away-from-home case: offline mode is OFF and the connectivity flags still say
+  // reachable (they default optimistically and are only corrected after repeated ping
+  // failures), so `cannotAskNow()` is false. The probe times out, the verdict falls back
+  // to a persisted >= 0.64, and without this the pass discarded 45 tables against a
+  // server that was never there.
+  it('refuses when nothing says we are offline but the server never answered', async () => {
+    mockCannotAsk = false;
+    mockServerAnswered = false;
+
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toEqual([]);
+    expect(mockCalls).not.toContain('discardLibrary');
+    expect(migrationGateStore.getState().visible).toBe(false);
+  });
+
+
+  // The availability check used to run BEFORE the verdict, and the probe never records
+  // an answer for installs it short-circuits — so every non-Navidrome and every
+  // already-complete install logged "deferred" on every launch.
+  it('returns silently for an install that will never need the pass', async () => {
+    mockVerdict = 'skip';
+    mockServerAnswered = false;
+    mockCannotAsk = true;
+
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toEqual([]);
+    expect(mockLog).not.toHaveBeenCalledWith(expect.stringContaining('deferred'));
+  });
+
   it('runs normally once a server is reachable again', async () => {
     mockCannotAsk = false;
+  mockServerAnswered = true;
+  mockEtlInFlight = null;
+  mockLog.mockClear();
     await runNavidromeReidIfNeeded();
     expect(mockCalls).toContain('discardLibrary');
     expect(mockCalls).toContain('setReidState:complete');
   });
 });
+
+describe('the blob ETL race', () => {
+  // The ETL writes with `fromMigration`, which bypasses the write guard by design. An
+  // ETL already running when the gate went up would otherwise keep upserting retired-id
+  // rows straight through discardLibrary and past the completion stamp.
+  it('waits for an in-flight ETL before touching the library', async () => {
+    let release = (): void => {};
+    mockEtlInFlight = new Promise<void>((r) => { release = r; });
+    const run = runNavidromeReidIfNeeded();
+    await Promise.resolve();
+
+    // Nothing destructive may have happened yet.
+    expect(mockCalls).not.toContain('discardLibrary');
+
+    release();
+    await run;
+
+    // -1 would satisfy a bare "less than", so assert presence first.
+    expect(mockCalls).toContain('awaitEtl');
+    expect(mockCalls.indexOf('awaitEtl')).toBeLessThan(mockCalls.indexOf('discardLibrary'));
+    expect(mockCalls).toContain('setReidState:complete');
+  });
+
+  it('proceeds straight through when no ETL is running', async () => {
+    await runNavidromeReidIfNeeded();
+    expect(mockCalls).not.toContain('awaitEtl');
+    expect(mockCalls).toContain('discardLibrary');
+  });
+});
+
 
 

@@ -23,6 +23,8 @@ import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from './normalizedMigrationKey'
 import { kvStorage } from '@/store/persistence';
 import { syncStatusStore } from '@/store/syncStatusStore';
 import { migrationChainComplete } from './migrationService';
+import { isMigrationGateVisible } from '../store/migrationGateStore';
+import { isReidComplete } from './navidromeReid/reidMarker';
 
 /** Stamped after a successful full migration; the sole trigger gate.
  *
@@ -32,6 +34,11 @@ import { migrationChainComplete } from './migrationService';
 export { MIGRATION_DONE_KEY, MIGRATION_VERSION } from './normalizedMigrationKey';
 
 let inFlight: Promise<void> | null = null;
+
+/** The run in progress, for callers that must not overlap it. Null when idle. */
+export function dataModelUpgradeInFlight(): Promise<void> | null {
+  return inFlight;
+}
 
 /**
  * Convert any un-migrated legacy blob/KV data into the normalized tables, in the
@@ -61,6 +68,22 @@ export function runDataModelUpgradeIfNeeded(): Promise<void> {
       // half-migrated legacy data — see `migrationChainComplete`.
       if (!(await migrationChainComplete())) return;
 
+      // Never alongside the Navidrome re-key. This ETL writes with `fromMigration`, which
+      // deliberately bypasses `shouldBlockLibraryWrites` — so without this it happily
+      // upserts retired-id blob rows straight through the pass's `discardLibrary` and
+      // past its completion stamp, leaving a canonical library polluted with retired ids
+      // and no automatic recovery. The pass also waits for us (`runNavidromeReid`), so
+      // the two can never overlap in either direction.
+      if (isMigrationGateVisible()) return;
+
+      // A completed re-key means the library is canonical and the legacy blobs are
+      // retired ids. Re-importing them would undo the pass — which is what a future
+      // MIGRATION_VERSION bump would otherwise do on an already-re-keyed install.
+      if (isReidComplete()) {
+        await kvStorage.setItem(MIGRATION_DONE_KEY, MIGRATION_VERSION);
+        return;
+      }
+
       // ONE-SHOT, never a drift check ("blobs hold more rows than normalized"). The blob
       // tables are frozen, so their counts are a permanent high-water mark: any later
       // shrink in normalized (a reap, an interrupted resync) would re-migrate that stale
@@ -68,9 +91,9 @@ export function runDataModelUpgradeIfNeeded(): Promise<void> {
       if ((await kvStorage.getItem(MIGRATION_DONE_KEY)) === MIGRATION_VERSION) return;
 
       syncStatusStore.getState().setNormalizedMigration('migrating', 0, 0);
-      const result = await migrateBlobsToNormalized(db, undefined, (done, total) =>
-        syncStatusStore.getState().setNormalizedMigration('migrating', done, total),
-      );
+      const result = await migrateBlobsToNormalized(db, undefined, (done, total) => {
+        syncStatusStore.getState().setNormalizedMigration('migrating', done, total);
+      });
       await kvStorage.setItem(MIGRATION_DONE_KEY, MIGRATION_VERSION);
       syncStatusStore.getState().setNormalizedMigration('idle', 0, 0);
       // Fold the (large) WAL in the background — does NOT block completion.

@@ -58,6 +58,7 @@ import { useLayoutMode } from '../hooks/useLayoutMode';
 import { useTheme } from '../hooks/useTheme';
 import {
   deferredDataSyncInit,
+  onConnectivityRestored,
   onOnlineResume,
   onStartup,
   recoverStalledSync,
@@ -451,6 +452,15 @@ export default function RootLayout() {
         // Drain anything left in the persistent image queue (queued or
         // recovered-from-stalled). No-op when the queue is empty or paused.
         void processImageQueue();
+        // And resume the data flow. Without this, a user who was away from home — or
+        // whose server was briefly unreachable — never recovers: the re-key probe is
+        // never re-asked, so the pass stays deferred, library writes stay refused, and
+        // nothing syncs until the app is relaunched. The offline-mode toggle has always
+        // done this; simply walking back into range did not.
+        //
+        // Throttled, because this edge can repeat every few seconds on a flaky link,
+        // unlike the deliberate toggle.
+        void onConnectivityRestored();
       }
       prevReachable = reachableNow;
     });

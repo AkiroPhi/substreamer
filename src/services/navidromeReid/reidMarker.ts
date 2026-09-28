@@ -193,10 +193,30 @@ export function markProbeSettled(): void {
   probeSettled = true;
 }
 
+/**
+ * Set only when the server actually responded this session.
+ *
+ * Distinct from `probeSettled`, which is also true after a timeout. The re-key discards
+ * the library and depends on the sync that follows to rebuild it, so "we believe we are
+ * online" is not good enough to start it — a server that never answers leaves the app
+ * empty with no way back. Only a real round-trip proves there is something to refill from.
+ */
+let serverAnswered = false;
+
+export function markServerAnswered(): void {
+  serverAnswered = true;
+}
+
+/** Did the server respond to us this session? */
+export function hasServerAnswered(): boolean {
+  return serverAnswered;
+}
+
 /** Test-only: forget the probe result. */
 export function resetReidProbeForTests(): void {
   probedVersion = null;
   probeSettled = false;
+  serverAnswered = false;
 }
 
 /**
@@ -214,5 +234,14 @@ export function shouldBlockLibraryWrites(): boolean {
   if (isReidComplete()) return false;
   if (currentServerInfo().serverType?.toLowerCase() !== 'navidrome') return false;
   if (!probeSettled) return true;
+  // Settled is not the same as answered. A TIMEOUT settles, leaving `probedVersion`
+  // null, so the verdict falls back to the PERSISTED version — which on the launch
+  // after a server upgrade still reads the old one and yields 'skip'. Writes would then
+  // be allowed and the sync would run against an upgraded server with retired ids: the
+  // doubled library, reached by a slow ping rather than by offline mode.
+  //
+  // Safe only because a settled-but-unanswered probe stays retryable (`reidProbe`), so
+  // this blocks until we can actually ask rather than for the whole session.
+  if (!hasServerAnswered()) return true;
   return reidVerdict() !== 'skip';
 }

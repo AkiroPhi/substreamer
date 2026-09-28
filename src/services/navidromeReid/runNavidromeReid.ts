@@ -35,7 +35,8 @@ import { moveDownloadedFiles } from './reidFiles';
 import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
 import { cannotAskNow } from './reidProbe';
-import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
+import { hasServerAnswered, reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
+import { dataModelUpgradeInFlight } from '../dataModelUpgradeService';
 import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../normalizedMigrationKey';
 import {
   deleteSupersededRows,
@@ -57,24 +58,33 @@ let inFlight: Promise<void> | null = null;
 export function runNavidromeReidIfNeeded(): Promise<void> {
   if (inFlight) return inFlight;
 
-  // Nothing about this pass is safe without a server to refill from. It discards the
-  // whole library and depends on the sync that follows to rebuild it, so running it
-  // offline empties the app and leaves it empty — measured on a fixture with in-app
-  // offline mode on and a persisted 0.64 version: "library discarded (45 tables)",
-  // marker stamped complete, songs 0, albums 0, and no sync able to run. The marker
-  // then prevents a retry. The `ask` prompt is worse still: it appears offline and a
-  // "yes" confirms straight into the same thing.
+  // Verdict FIRST. `skip` covers every install that will never need this — not
+  // Navidrome, or already complete — and those must return silently: the availability
+  // check below can never pass for them, because the probe short-circuits without ever
+  // recording an answer, so testing it first logged "deferred" on every launch for
+  // every user.
+  const verdict = reidVerdict();
+  if (verdict === 'skip') return Promise.resolve();
+
+  // Only now, for an install that genuinely needs the pass: may it run RIGHT NOW?
   //
-  // Deliberately checked HERE and not folded into `reidVerdict`: the verdict answers
-  // "does this install need the re-key", which is still true offline. This answers
-  // "may it run right now", which is a different question with a different lifetime.
-  if (cannotAskNow()) {
-    logLibrarySync('[reid] deferred — offline or server unreachable; nothing could refill the library');
+  // Nothing about it is safe without a server to refill from. It discards the whole
+  // library and depends on the sync that follows to rebuild it — measured on a fixture
+  // with offline mode on and a persisted 0.64: "library discarded (45 tables)", marker
+  // stamped complete, songs 0, and no sync able to run. The `ask` prompt is worse: it
+  // appears offline and a "yes" confirms straight into the same thing.
+  //
+  // `cannotAskNow()` alone is not enough — the connectivity flags default optimistically
+  // to reachable, so a user away from home sails past it and the probe merely times out.
+  // Require a CONFIRMED round-trip: only a server that actually answered proves there is
+  // something to rebuild from. Kept out of `reidVerdict` deliberately — the verdict
+  // answers "does this install need the re-key", which stays true offline; this answers
+  // "may it run now", a different question with a different lifetime.
+  if (cannotAskNow() || !hasServerAnswered()) {
+    logLibrarySync('[reid] deferred — no confirmed server; nothing could refill the library');
     return Promise.resolve();
   }
 
-  const verdict = reidVerdict();
-  if (verdict === 'skip') return Promise.resolve();
   if (verdict === 'ask') {
     migrationGateStore.getState().show('asking');
     return Promise.resolve();
@@ -119,6 +129,17 @@ async function execute(): Promise<void> {
 
   gate.beginStage('preparing');
   setReidState('pending');
+
+  // An ETL that started before the gate went up is still running, and its writes carry
+  // `fromMigration` so the write guard lets them through. Left alone it would keep
+  // upserting retired-id blob rows straight through `discardLibrary` below and past the
+  // completion stamp. `runDataModelUpgradeIfNeeded` refuses to START while the gate is
+  // visible; this closes the other direction.
+  const etl = dataModelUpgradeInFlight();
+  if (etl) {
+    logLibrarySync('[reid] waiting for the blob ETL to finish before touching the library');
+    await etl;
+  }
 
   try {
     // Prove the deferral works on THIS build before writing anything. The spike that

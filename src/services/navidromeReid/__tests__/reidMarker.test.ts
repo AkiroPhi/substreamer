@@ -222,12 +222,16 @@ describe('the live version probe', () => {
     expect(shouldBlockLibraryWrites()).toBe(false);
   });
 
-  it('settles, rather than blocking forever, when the server is unreachable', async () => {
+  it('blocks writes when the server never answered, but stays retryable', async () => {
     mockServerVersion = '0.61.2 (aa84e645)';
     mockPing = new Error('unreachable');
     await (probeServerVersion() ?? Promise.resolve());
-    // A server that cannot answer a ping cannot serve a sync either.
-    expect(shouldBlockLibraryWrites()).toBe(false);
+
+    // Settled, but with no answer the verdict would fall back to the stale persisted
+    // version. Blocking is the fail-safe direction; it is bounded because the probe
+    // can still be retried.
+    expect(shouldBlockLibraryWrites()).toBe(true);
+    expect(probeServerVersion()).not.toBeNull();
   });
 
   // Offline mode is a user choice on a possibly-connected device, and it can be revoked
@@ -281,10 +285,12 @@ describe('the live version probe', () => {
 
   // A timeout is different from never asking: the server WAS asked and did not answer,
   // so it must settle or an unreachable server would block writes forever.
-  it('settles on a real timeout', async () => {
+  it('releases writes once the server answers and says it is below the floor', async () => {
     mockServerVersion = '0.61.2 (aa84e645)';
-    mockPing = new Error('unreachable');
+    mockPing = { status: 'ok', serverVersion: '0.61.2 (aa84e645)' };
     await (probeServerVersion() ?? Promise.resolve());
+
+    // A real answer below the floor means no re-key is needed and the sync is safe.
     expect(shouldBlockLibraryWrites()).toBe(false);
   });
 
@@ -298,3 +304,39 @@ describe('the live version probe', () => {
     expect(probeServerVersion()).toBeNull();
   });
 });
+
+describe('a timed-out probe stays retryable', () => {
+  // One 4s timeout used to freeze the session: probeDone latched, so the online-resume
+  // re-probe returned null, the pass stayed refused and writes stayed blocked until
+  // relaunch. The probe's budget is tighter than the connectivity ping's, so a
+  // slow-but-alive server hit this.
+  it('re-probes after a timeout, and succeeds the second time', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    mockPing = new Error('unreachable');
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(reidVerdict()).toBe('skip');   // fell back to the stale persisted version
+
+    // The server comes back.
+    mockPing = { status: 'ok', serverVersion: '0.64.0 (1072e9f7)' };
+    const second = probeServerVersion();
+    expect(second).not.toBeNull();
+    await (second ?? Promise.resolve());
+
+    expect(reidVerdict()).toBe('run');
+  });
+
+  it('stops probing once the server has actually answered', async () => {
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(probeServerVersion()).toBeNull();
+  });
+
+  // A Subsonic-level failure arrives as HTTP 200 with status 'failed'. The server
+  // plainly exists, so it counts as an answer — otherwise an auth error would block
+  // library writes for the whole session.
+  it('counts a well-formed failure envelope as the server existing', async () => {
+    mockPing = { status: 'failed' };
+    await (probeServerVersion() ?? Promise.resolve());
+    expect(probeServerVersion()).toBeNull();
+  });
+});
+

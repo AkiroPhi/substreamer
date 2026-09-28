@@ -219,7 +219,47 @@ export async function onOnlineResume(): Promise<void> {
   await startupOrResumeFlow();
 }
 
-async function startupOrResumeFlow(): Promise<void> {
+/**
+ * Same as {@link onOnlineResume} but rate-limited, for the connectivity subscriber.
+ *
+ * A flaky link flips reachable every ~10-15s and would otherwise re-run the whole
+ * fan-out each time. A deliberate user action (the offline-mode toggle) keeps the
+ * unthrottled path — they asked for it, once.
+ */
+export async function onConnectivityRestored(): Promise<void> {
+  if (offlineModeStore.getState().offlineMode) return;
+  await startupOrResumeFlow(true);
+}
+
+/**
+ * Guards for {@link startupOrResumeFlow}.
+ *
+ * It has three callers now — startup, the offline-mode toggle, and the connectivity
+ * subscriber — and the fan-out it kicks is not cheap or self-limiting:
+ * `refreshAllIfDue(0)` can never be time-gated at zero, and `refreshAll` has no
+ * in-flight guard of its own. A flaky link flips reachable roughly every 10-15s
+ * (two consecutive ping failures at the unreachable interval), which without this
+ * re-runs `fetchServerInfo` + scan status + four album-list fetches + a full upsert +
+ * cover prefetch + starred, plus the idle artist/playlist/genre fan-out, each time.
+ */
+let resumeInFlight: Promise<void> | null = null;
+let lastResumeAt = 0;
+const RESUME_MIN_INTERVAL_MS = 30_000;
+
+async function startupOrResumeFlow(throttled = false): Promise<void> {
+  // De-duplication always: two callers racing must not run the fan-out twice.
+  if (resumeInFlight) return resumeInFlight;
+  // Throttling only for the caller that can repeat on its own. Startup and the
+  // post-re-key re-entry MUST never be throttled — the sync that refills the library
+  // runs about two seconds after the one the gate refused, so a blanket interval would
+  // silently swallow it and leave the user with an empty library.
+  if (throttled && Date.now() - lastResumeAt < RESUME_MIN_INTERVAL_MS) return;
+  lastResumeAt = Date.now();
+  resumeInFlight = resumeFlowBody().finally(() => { resumeInFlight = null; });
+  return resumeInFlight;
+}
+
+async function resumeFlowBody(): Promise<void> {
   // Settle the Navidrome re-key question BEFORE anything fetches. The probe is a no-op
   // once the splash has run it; it does real work only on an online-resume, which is the
   // path that can discover an upgraded server mid-session. Awaiting rather than
