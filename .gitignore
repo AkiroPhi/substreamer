@@ -57,6 +57,7 @@ plans/
 !/sim-snapshots/README.md
 !/sim-snapshots/restore.sh
 !/sim-snapshots/list.sh
+!/sim-snapshots/verify.sh
 
 # test coverage
 coverage/
