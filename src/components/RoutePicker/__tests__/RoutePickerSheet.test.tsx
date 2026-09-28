@@ -75,7 +75,7 @@ describe('RoutePickerSheet', () => {
     const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
     act(() => useRoutePickerStore.getState().open());
     render(<RoutePickerSheet />);
-    expect(screen.getByText('Local Network access denied')).toBeTruthy();
+    expect(screen.getByText('Local Network access is off')).toBeTruthy();
     fireEvent.press(screen.getByTestId('route-picker-open-settings'));
     expect(openSettings).toHaveBeenCalledTimes(1);
     openSettings.mockRestore();
@@ -89,6 +89,20 @@ describe('RoutePickerSheet', () => {
     act(() => useRoutePickerStore.getState().close());
     rerender(<RoutePickerSheet />);
     expect(rnqp.Cast.stopDiscovery).toHaveBeenCalled();
+    await flush();
+  });
+
+  it('offers the in-app prompt, not Settings, when permission was never asked', async () => {
+    // iOS only lists an app under Privacy > Local Network once it has ASKED. Sending an
+    // un-asked user to Settings lands them on a screen with no entry to toggle.
+    rnqp.Cast.getLocalNetworkPermissionState.mockReturnValue('undetermined');
+    rnqp.__setCastSnapshot({ permission: 'undetermined' });
+    act(() => useRoutePickerStore.getState().open());
+    render(<RoutePickerSheet />);
+
+    expect(screen.queryByTestId('route-picker-open-settings')).toBeNull();
+    fireEvent.press(screen.getByTestId('route-picker-request-permission'));
+    expect(rnqp.Cast.requestLocalNetworkPermission).toHaveBeenCalled();
     await flush();
   });
 });

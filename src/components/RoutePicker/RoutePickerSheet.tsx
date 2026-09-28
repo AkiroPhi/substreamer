@@ -54,7 +54,7 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
     [],
   );
 
-  const { routes, state, connect, disconnect } = useRouteDiscovery();
+  const { routes, state, connect, disconnect, requestPermission } = useRouteDiscovery();
   const audioRoute = useAudioRoute();
 
   // iOS AirPlay / Bluetooth are OS-managed — they surface as the system audio
@@ -136,22 +136,44 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
           <Text style={{ color: t.textSubtle }}>Looking for nearby devices…</Text>
         </View>
       )}
+      {/* Never asked, or asked and not yet answered. Settings is the WRONG place to send
+          anyone here: iOS only lists an app under Privacy > Local Network once it has
+          asked, so an un-asked user finds no entry to toggle. Offer the prompt instead. */}
+      {state === 'permission-pending' && (
+        <View style={styles.empty}>
+          <Text style={{ color: t.text, fontWeight: '600' }}>
+            Allow Substreamer to find devices
+          </Text>
+          <Text style={{ color: t.textSubtle, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+            Chromecast and speakers are discovered on your local network.
+          </Text>
+          <Pressable
+            testID="route-picker-request-permission"
+            onPress={() => { void requestPermission(); }}
+            accessibilityRole="button"
+            hitSlop={8}
+          >
+            <Text style={{ color: t.accent, fontSize: 13, marginTop: 8, fontWeight: '600' }}>
+              Allow Local Network access
+            </Text>
+          </Pressable>
+        </View>
+      )}
       {state === 'permission-denied' && (
         <View style={styles.empty}>
           <Text style={{ color: t.errorIndicator, fontWeight: '600' }}>
-            Local Network access denied
+            Local Network access is off
           </Text>
-          {/* iOS asks once; after a denial only Settings can change the answer. */}
+          {/* Only once genuinely denied has the app been asked, so it now HAS an entry in
+              Settings and sending the user there actually leads somewhere. */}
           <Pressable
             testID="route-picker-open-settings"
-            onPress={() => {
-              void Linking.openSettings();
-            }}
+            onPress={() => { void Linking.openSettings(); }}
             accessibilityRole="button"
             hitSlop={8}
           >
             <Text style={{ color: t.accent, fontSize: 12, marginTop: 4 }}>
-              Open Settings to grant Local Network for this app.
+              Turn on Local Network for Substreamer in Settings.
             </Text>
           </Pressable>
         </View>

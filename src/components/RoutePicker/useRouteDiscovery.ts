@@ -14,6 +14,8 @@ export interface UseRouteDiscoveryResult {
   disconnect: () => Promise<void>;
   /** Stops discovery (typically on sheet close). */
   stopDiscovery: () => Promise<void>;
+  /** Raise the iOS Local Network prompt from the sheet. */
+  requestPermission: () => Promise<void>;
 }
 
 /**
@@ -24,6 +26,14 @@ export interface UseRouteDiscoveryResult {
  */
 export function useRouteDiscovery(): UseRouteDiscoveryResult {
   const snapshot = useCast();
+  /** Raise the system prompt. Safe to call again — iOS shows it once, and a repeat
+   *  call just re-reads the answer. */
+  const requestPermission = useCallback(async () => {
+    try {
+      await Cast.requestLocalNetworkPermission();
+      await Cast.startDiscovery();
+    } catch { /* the sheet reflects whatever state the probe settles on */ }
+  }, []);
   const [connectingIds, setConnectingIds] = useState<Set<string>>(new Set());
   const [errorById, setErrorById] = useState<Record<string, string>>({});
 
@@ -32,7 +42,7 @@ export function useRouteDiscovery(): UseRouteDiscoveryResult {
     // on iOS, what raises the system prompt on first use — here, where the user
     // is looking for devices. Android below target 37 is always granted.
     if (Cast.getLocalNetworkPermissionState() !== 'granted') {
-      Cast.requestLocalNetworkPermission().catch(() => {});
+      void requestPermission();
     }
     Cast.startDiscovery().catch(() => {});
     return () => {
@@ -42,6 +52,9 @@ export function useRouteDiscovery(): UseRouteDiscoveryResult {
 
   const state: DiscoveryState = useMemo(() => {
     if (snapshot.permission === 'denied') return 'permission-denied';
+    // Asked but unanswered, or never asked: the user can still grant it from here, so
+    // offer the prompt rather than a Settings link that leads nowhere useful.
+    if (snapshot.permission === 'undetermined') return 'permission-pending';
     if (!snapshot.isAvailable) return 'error';
     return snapshot.isDiscovering ? 'scanning' : 'idle';
   }, [snapshot.permission, snapshot.isAvailable, snapshot.isDiscovering]);
@@ -121,5 +134,6 @@ export function useRouteDiscovery(): UseRouteDiscoveryResult {
     connect,
     disconnect,
     stopDiscovery,
+    requestPermission,
   };
 }

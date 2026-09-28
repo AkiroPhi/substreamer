@@ -25,8 +25,15 @@ export interface RouteInfo {
   lastError?: string;
 }
 
-/** Discovery lifecycle state shown in the sheet header. */
-export type DiscoveryState = 'idle' | 'scanning' | 'permission-denied' | 'error';
+/**
+ * Discovery lifecycle state shown in the sheet header.
+ *
+ * `permission-pending` and `permission-denied` are deliberately separate. iOS only lists
+ * an app under Settings > Privacy > Local Network once the app has ASKED, so telling an
+ * un-asked user to go to Settings sends them to a screen where the app does not appear.
+ */
+export type DiscoveryState =
+  | 'idle' | 'scanning' | 'permission-pending' | 'permission-denied' | 'error';
 
 /** Theming tokens for the picker. Built from the app theme via useRoutePickerTheme. */
 export interface RoutePickerTheme {
