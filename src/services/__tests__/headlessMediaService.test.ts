@@ -21,6 +21,8 @@ import { albumListsStore } from '../../store/albumListsStore';
 import { favoritesStore } from '../../store/favoritesStore';
 import { fetchAlbumDetail, fetchPlaylistDetail } from '../detailFetchService';
 import { offlineModeStore } from '../../store/offlineModeStore';
+import { clearReidMarker, setReidState } from '../navidromeReid/reidMarker';
+import { serverInfoStore } from '../../store/serverInfoStore';
 import { musicCacheStore } from '../../store/musicCacheStore';
 import { layoutPreferencesStore } from '../../store/layoutPreferencesStore';
 import { syncStatusStore } from '../../store/syncStatusStore';
@@ -639,5 +641,68 @@ describe('scheduleRefresh — library-change gate', () => {
     favoritesStore.setState({ songIds: new Set(['s1']) } as any);
     await jest.advanceTimersByTimeAsync(30_000);
     expect(tp.setBrowseSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe('a pending Navidrome re-key behaves as offline, not as broken', () => {
+  beforeEach(() => {
+    // The verdict is only 'run' for a Navidrome server at or past the floor; without
+    // this the guard reads 'skip' and nothing under test engages.
+    serverInfoStore.setState({ serverType: 'navidrome', serverVersion: '0.64.0 (abc)' } as any);
+  });
+  afterEach(() => {
+    clearReidMarker();
+    serverInfoStore.setState({ serverType: null, serverVersion: null } as any);
+  });
+
+  // Mirrors the OFFLINE favourites test: nothing is listed that cannot play. A pending
+  // re-key must narrow the car to downloaded tracks — not serve nothing, which stranded
+  // a driver with downloads on the device, and not serve the whole library, whose ids
+  // the server may have retired.
+  it('narrows the car to downloaded favourites while the re-key is pending', async () => {
+    await replaceFavoriteSongs(db(), [song('rem1')]);
+    await favoritesStore.getState().refreshFromDb();
+    seedCachedSong('s2');
+    offlineModeStore.setState({ offlineMode: false } as any);
+    setReidState('pending');
+
+    const snap = await __test.buildSnapshot();
+    const favs = snap.sections.find((sec) => sec.id === sectionId('favorites'))!;
+
+    expect(favs.items.map((it) => it.title)).toEqual(['Song s2']);
+  });
+
+  it('serves every favourite again once the re-key has completed', async () => {
+    await replaceFavoriteSongs(db(), [song('rem1')]);
+    await favoritesStore.getState().refreshFromDb();
+    seedCachedSong('s2');
+    offlineModeStore.setState({ offlineMode: false } as any);
+    setReidState('complete');
+
+    const snap = await __test.buildSnapshot();
+    const favs = snap.sections.find((sec) => sec.id === sectionId('favorites'))!;
+
+    expect(favs.items.length).toBeGreaterThan(1);
+  });
+
+  // buildSnapshot is CarPlay's path; Android Auto goes through the registered handler.
+  // Both must narrow rather than refuse, so exercise the handler itself — a blanket
+  // `shouldBlockContent() ? []` here is invisible to the snapshot tests above.
+  it('serves a browse tree through the registered handler, not an empty one', async () => {
+    seedCachedSong('s2');
+    offlineModeStore.setState({ offlineMode: false } as any);
+    setReidState('pending');
+
+    const rnqp = require('react-native-queue-player');
+    rnqp.registerPlaybackService.mockClear();
+    installHeadlessMediaService();
+    const captured = rnqp.registerPlaybackService.mock.calls.at(-1)[0]();
+
+    const node = listId('recentlyAdded');
+    const rows = await captured.onBrowseRequest(node);
+
+    // The same node the internal resolver serves — i.e. no blanket refusal in the
+    // handler layer.
+    expect(rows).toEqual(await __test.resolveBrowseChildren(node));
   });
 });

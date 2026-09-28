@@ -207,6 +207,11 @@ export function markServerAnswered(): void {
   serverAnswered = true;
 }
 
+/** The version the server reported this launch, or null if it never answered. */
+export function probedServerVersion(): string | null {
+  return probedVersion;
+}
+
 /** Did the server respond to us this session? */
 export function hasServerAnswered(): boolean {
   return serverAnswered;

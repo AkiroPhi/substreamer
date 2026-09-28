@@ -91,8 +91,22 @@ const SEARCH_ID_PREFIX = 'search:';
 /*  Mode-appropriate data selectors                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Offline for the car's purposes — the user's own offline mode, OR a Navidrome re-key
+ * that has not run yet.
+ *
+ * A pending re-key means our ids may be the ones the server has retired, so anything
+ * server-backed would 404. Downloads are different: they play from local files keyed by
+ * `cached_songs`, so their ids never reach the server and they work exactly as they do
+ * in offline mode. Treating the pending state AS offline therefore reuses a path that is
+ * already correct rather than inventing a second one — and it is what the user asked
+ * for: a car that still plays your downloaded music while the update waits.
+ *
+ * This replaced a blanket refusal that returned an empty browse tree, which stranded
+ * someone driving away from home with downloaded music and no way to reach it.
+ */
 function isOffline(): boolean {
-  return offlineModeStore.getState().offlineMode;
+  return offlineModeStore.getState().offlineMode || shouldBlockContent();
 }
 
 /** All library albums from the normalized `albums` table (sort-title order). This is a
@@ -337,7 +351,7 @@ async function buildSnapshot(): Promise<BrowseSnapshot> {
  * against, so filtering one caller and not another would play the wrong track.
  */
 function playableOffline(songs: Child[]): Child[] {
-  if (!offlineModeStore.getState().offlineMode) return songs;
+  if (!isOffline()) return songs;
   const cached = musicCacheStore.getState().cachedSongs;
   return songs.filter((s) => s.id in cached);
 }
@@ -596,7 +610,8 @@ async function resolveVoice(request: MediaSearchRequest): Promise<Child[]> {
  * route) through the same resolver + playback path as `onPlayFromSearchRequest`.
  */
 export async function dispatchVoiceSearchRequest(request: MediaSearchRequest): Promise<void> {
-  if (shouldBlockContent()) return;
+  // No re-key refusal: `resolveVoice` runs through the same offline-aware resolvers as
+  // browse, so a pending re-key narrows this to downloads rather than blocking it.
   const queue = await resolveVoice(request);
   if (queue.length === 0) return;
   await playTrack(queue[0], queue, null);
@@ -651,9 +666,12 @@ async function pushSnapshot(): Promise<void> {
     // A pending Navidrome id re-key means every id we hold is one the server has
     // retired. `index.js` loads playerBootstrap before expo-router, so a CarPlay / Siri /
     // lock-screen cold wake arms this service without rendering `_layout` and without
-    // running the migration chain — the interstitial cannot gate it. Serving those ids
-    // fails anyway; serving nothing until the user opens the app is the honest failure.
-    if (shouldBlockContent()) return;
+    // running the migration chain — the interstitial cannot gate it.
+    //
+    // The snapshot is still pushed, because `buildSnapshot` reads the same offline-aware
+    // browse tree: a pending re-key narrows it to downloaded music, which plays from
+    // local files and needs no server. Refusing outright used to leave a driver with
+    // downloads on the device and an empty car UI.
     if (getTrackPlayer().isCarConnected()) {
       const snapshot = await buildSnapshot();
       getTrackPlayer().setBrowseSnapshot(snapshot);
@@ -671,10 +689,11 @@ async function pushSnapshot(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 const handler: PlaybackServiceHandler = {
-  onBrowseRequest: async (parentId) => (shouldBlockContent() ? [] : resolveBrowseChildren(parentId)),
-  onSearchRequest: async (query) => (shouldBlockContent() ? [] : resolveSearch(query)),
+  // No blanket refusal here any more: `isOffline()` already covers a pending re-key, so
+  // these resolve the downloads-only view rather than an empty one.
+  onBrowseRequest: async (parentId) => resolveBrowseChildren(parentId),
+  onSearchRequest: async (query) => resolveSearch(query),
   onPlayFromIdRequest: async (mediaId) => {
-    if (shouldBlockContent()) return [];
     const { queue, startIndex, sourcePlaylistId } = await resolvePlayback(mediaId);
     if (queue.length === 0) return [];
     // Fire-and-forget playTrack (carries app bookkeeping); native steps back and
@@ -684,7 +703,6 @@ const handler: PlaybackServiceHandler = {
     return rnTracks;
   },
   onPlayFromSearchRequest: async (request) => {
-    if (shouldBlockContent()) return [];
     const queue = await resolveVoice(request);
     if (queue.length === 0) return [];
     void playTrack(queue[0], queue, null);

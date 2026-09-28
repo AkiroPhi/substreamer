@@ -36,6 +36,7 @@ import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
 import { cannotAskNow } from './reidProbe';
 import { hasServerAnswered, reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
+import { appendReidLog } from './reidMigrationLog';
 import { dataModelUpgradeInFlight } from '../dataModelUpgradeService';
 import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../normalizedMigrationKey';
 import {
@@ -82,6 +83,7 @@ export function runNavidromeReidIfNeeded(): Promise<void> {
   // "may it run now", a different question with a different lifetime.
   if (cannotAskNow() || !hasServerAnswered()) {
     logLibrarySync('[reid] deferred — no confirmed server; nothing could refill the library');
+    appendReidLog('deferred', ['reason: no confirmed server — nothing could refill the library']);
     return Promise.resolve();
   }
 
@@ -162,6 +164,7 @@ async function execute(): Promise<void> {
       setReidState('complete');
       gate.hide();
       logLibrarySync('[reid] nothing to do');
+      appendReidLog('nothing to do', ['every id was already canonical']);
       return;
     }
 
@@ -276,6 +279,12 @@ async function execute(): Promise<void> {
     await dropIdMap(db);
     setReidState('complete');
     logLibrarySync('[reid] complete');
+    appendReidLog('complete', [
+      `ids re-keyed     : ${pairs}`,
+      `superseded rows  : ${superseded}`,
+      `files moved      : ${files.moved} (missing ${files.missing}, failed ${files.failed})`,
+      `tables discarded : ${cleared}`,
+    ]);
     // Buffered behind a 2s timer and nothing wires a flush to AppState, so without this
     // the lines explaining a run are exactly the ones an app kill loses.
     await flushLibrarySyncLog();
@@ -284,6 +293,7 @@ async function execute(): Promise<void> {
     // The marker stays `pending`, so the next launch re-enters the interstitial and
     // repeats from the top. Every step is idempotent, so that is safe.
     logLibrarySync(`[reid] failed: ${e instanceof Error ? e.message : String(e)}`);
+    appendReidLog('FAILED', [`error: ${e instanceof Error ? e.message : String(e)}`]);
     await flushLibrarySyncLog();
     gate.fail();
   }

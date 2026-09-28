@@ -35,9 +35,14 @@ const ROW_CHUNK = 250;
  * Legacy envelope columns that exist ON DISK but not in `src/db/schema.ts`, so no
  * generated or schema-derived list can see them.
  *
- * `runLegacyColumnDropIfNeeded` removes them once its backfill has nothing left to do, and
- * that drop is idle-staged AFTER this pass — so the population we are repairing is exactly
- * the population that still has them. Leaving them stale is not cosmetic: the backfill
+ * `runLegacyColumnDropIfNeeded` removes them once its backfill has nothing left to do.
+ * That drop is idle-staged and USED to be guaranteed to follow this pass; since the pass
+ * can now be deferred across sessions (offline, or no confirmed server) the drop may run
+ * first. That is safe rather than lucky: `jsonColumnsForThisInstall` probes
+ * `PRAGMA table_info` per column, so a dropped column is simply skipped, and the backfill
+ * that would have rewritten our values no longer exists once its source column is gone.
+ *
+ * Where the columns DO still exist, leaving them stale is not cosmetic: the backfill
  * parses the envelope and writes `song_id`, `album_id`, `artist_id`, `cover_art` and
  * `parent` back over the re-keyed values, and listening history has no server copy.
  */
