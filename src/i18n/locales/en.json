@@ -1131,5 +1131,11 @@
   "migrationCompleteContinue": "Continue",
   "migrationPausedTitle": "Update paused",
   "migrationPausedBody": "Reopen Substreamer to finish updating your library.",
-  "migrationCompleteNote": "Your library still needs to be resynced, and the artwork for your downloaded music re-fetched. Both happen automatically in the background whenever you are online, so there is nothing to do."
+  "migrationCompleteNote": "Your library still needs to be resynced, and the artwork for your downloaded music re-fetched. Both happen automatically in the background whenever you are online, so there is nothing to do.",
+  "migrationOfferTitle": "Update your library now?",
+  "migrationOfferBody": "Your server has changed how it identifies tracks, so Substreamer needs to update its copy. This takes a few minutes and cannot be paused once it starts. Your downloaded music keeps playing throughout.",
+  "migrationOfferConfirm": "Update now",
+  "migrationOfferDecline": "Later",
+  "syncPendingLibraryUpdate": "Substreamer needs to finish updating your library for your server before it can sync again. That runs automatically the next time you open the app while your server is reachable.",
+  "migrationOfferDeclineHint": "Substreamer will ask again next time you open it. Until then your library will not update."
 }

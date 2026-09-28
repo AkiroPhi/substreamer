@@ -276,7 +276,7 @@ async function resumeFlowBody(): Promise<void> {
     // with no sync, no interstitial and no banner until they relaunched. Offer the pass
     // instead: the gate renders mid-session, and startup resumes when it finishes.
     logLibrarySync('[reid] startup fan-out refused — re-key outstanding; offering the pass');
-    void runNavidromeReidIfNeeded();
+    void runNavidromeReidIfNeeded({ midSession: true });
     return;
   }
 

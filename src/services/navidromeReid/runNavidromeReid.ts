@@ -56,7 +56,17 @@ let inFlight: Promise<void> | null = null;
  * settle the question it shows the interstitial in `asking` mode instead and returns —
  * the user's answer triggers a fresh call.
  */
-export function runNavidromeReidIfNeeded(): Promise<void> {
+export interface ReidRunOptions {
+  /**
+   * True when this is NOT the cold-start path — the app is already running and the user
+   * is using it. A cold start runs straight through: they are sat at a splash expecting
+   * startup work. Interrupting a live session with a multi-minute, uninterruptible
+   * migration is a different matter, so that asks first.
+   */
+  midSession?: boolean;
+}
+
+export function runNavidromeReidIfNeeded(opts: ReidRunOptions = {}): Promise<void> {
   if (inFlight) return inFlight;
 
   // Verdict FIRST. `skip` covers every install that will never need this — not
@@ -65,7 +75,13 @@ export function runNavidromeReidIfNeeded(): Promise<void> {
   // recording an answer, so testing it first logged "deferred" on every launch for
   // every user.
   const verdict = reidVerdict();
-  if (verdict === 'skip') return Promise.resolve();
+  if (verdict === 'skip') {
+    // Retire a deferral the probe has since overtaken: we deferred while nothing could
+    // answer, the server then answered pre-0.64, and the pass is not needed after all.
+    // Without this the sync card goes on claiming a pending update that will never come.
+    if (migrationGateStore.getState().deferred) migrationGateStore.getState().setDeferred(false);
+    return Promise.resolve();
+  }
 
   // Only now, for an install that genuinely needs the pass: may it run RIGHT NOW?
   //
@@ -82,6 +98,7 @@ export function runNavidromeReidIfNeeded(): Promise<void> {
   // answers "does this install need the re-key", which stays true offline; this answers
   // "may it run now", a different question with a different lifetime.
   if (cannotAskNow() || !hasServerAnswered()) {
+    migrationGateStore.getState().setDeferred(true);
     logLibrarySync('[reid] deferred — no confirmed server; nothing could refill the library');
     appendReidLog('deferred', ['reason: no confirmed server — nothing could refill the library']);
     return Promise.resolve();
@@ -89,6 +106,15 @@ export function runNavidromeReidIfNeeded(): Promise<void> {
 
   if (verdict === 'ask') {
     migrationGateStore.getState().show('asking');
+    return Promise.resolve();
+  }
+
+  // Mid-session: offer, do not seize. The pass clears the play queue and discards the
+  // library, and it cannot be interrupted once it starts, so taking over the screen
+  // while someone is listening is not ours to decide. Declining leaves the marker
+  // `pending`, so the next launch asks again.
+  if (opts.midSession && !userAcceptedThisSession) {
+    migrationGateStore.getState().show('offering');
     return Promise.resolve();
   }
 
@@ -109,6 +135,33 @@ export function confirmAndRunNavidromeReid(): Promise<void> {
   return runNavidromeReidIfNeeded();
 }
 
+/**
+ * The user accepted the mid-session offer. Session-scoped on purpose: declining should
+ * not be remembered past this launch, and accepting should not have to be repeated if
+ * the pass then fails and is retried.
+ */
+let userAcceptedThisSession = false;
+
+/** Test-only: forget a mid-session acceptance. */
+export function resetMidSessionAcceptanceForTests(): void {
+  userAcceptedThisSession = false;
+}
+
+/** The user said yes to the mid-session offer. */
+export function acceptMidSessionReid(): Promise<void> {
+  userAcceptedThisSession = true;
+  migrationGateStore.getState().show('working');
+  return runNavidromeReidIfNeeded({ midSession: true });
+}
+
+/** The user said "later". The marker stays pending, so the next launch runs it. */
+export function declineMidSessionReid(): void {
+  migrationGateStore.getState().hide();
+  migrationGateStore.getState().setDeferred(true);
+  logLibrarySync('[reid] user deferred the mid-session offer; will run at next launch');
+  appendReidLog('deferred by user', ['they chose Later on the mid-session prompt']);
+}
+
 /** Re-run after a failure, from the gate's retry button. */
 export function retryNavidromeReid(): Promise<void> {
   migrationGateStore.getState().clearFailure();
@@ -117,6 +170,7 @@ export function retryNavidromeReid(): Promise<void> {
 
 async function execute(): Promise<void> {
   const gate = migrationGateStore.getState();
+  gate.setDeferred(false);
   gate.show('working');
   const db = getDb();
   if (!db) {

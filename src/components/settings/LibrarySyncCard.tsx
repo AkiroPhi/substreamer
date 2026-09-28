@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../hooks/useTheme';
 import { settingsStyles } from '../../styles/settingsStyles';
 import { cancelAllSyncs, forceFullResync, resumeSync } from '../../services/dataSyncService';
+import { migrationGateStore } from '../../store/migrationGateStore';
 import { offlineModeStore } from '../../store/offlineModeStore';
 import { syncStatusStore } from '../../store/syncStatusStore';
 import { OfflineNotice } from './OfflineNotice';
@@ -18,6 +19,10 @@ export function LibrarySyncCard() {
   const { colors } = useTheme();
 
   const offlineMode = offlineModeStore((s) => s.offlineMode);
+  // A needed re-key that has not run blocks every library write for the session, so the
+  // sync controls below would accept a tap and do nothing. Say so instead.
+  const reidDeferred = migrationGateStore((s) => s.deferred);
+  const syncBlocked = offlineMode || reidDeferred;
   const lastSyncAt = syncStatusStore((s) => s.fullSyncCompletedAt);
   const librarySyncPhase = syncStatusStore((s) => s.librarySyncPhase);
   const songSyncPhase = syncStatusStore((s) => s.detailSyncPhase);
@@ -99,25 +104,25 @@ export function LibrarySyncCard() {
   }, []);
 
   const handleForceResync = useCallback(() => {
-    if (offlineMode) return;
+    if (syncBlocked) return;
     void forceFullResync();
-  }, [offlineMode]);
+  }, [syncBlocked]);
 
   const handlePause = useCallback(() => {
     cancelAllSyncs('user-cancel');
   }, []);
 
   const handleResume = useCallback(() => {
-    if (offlineMode) return;
+    if (syncBlocked) return;
     void resumeSync();
-  }, [offlineMode]);
+  }, [syncBlocked]);
 
   // Restart is the "unstick" recovery: cancel the in-flight sync, clear, and
   // re-run from scratch. No confirm — the user chose it during an active sync.
   const handleRestart = useCallback(() => {
-    if (offlineMode) return;
+    if (syncBlocked) return;
     void forceFullResync();
-  }, [offlineMode]);
+  }, [syncBlocked]);
 
   const secondaryButton = (
     onPress: () => void,
@@ -128,12 +133,12 @@ export function LibrarySyncCard() {
     <Pressable
       key={key}
       onPress={onPress}
-      disabled={offlineMode && key !== 'pause'}
+      disabled={syncBlocked && key !== 'pause'}
       style={({ pressed }) => [
         settingsStyles.actionRowButton,
         { borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth },
         pressed && settingsStyles.pressed,
-        offlineMode && key !== 'pause' && settingsStyles.disabled,
+        syncBlocked && key !== 'pause' && settingsStyles.disabled,
       ]}
     >
       <Ionicons name={icon} size={18} color={colors.textPrimary} />
@@ -259,6 +264,15 @@ export function LibrarySyncCard() {
           </View>
         )}
 
+        {reidDeferred && (
+          <View style={styles.statusRow} testID="sync-card-reid-deferred">
+            <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.statusText, { color: colors.textSecondary, flex: 1 }]}>
+              {t('syncPendingLibraryUpdate')}
+            </Text>
+          </View>
+        )}
+
         <View style={[styles.legacyRow, { borderTopColor: colors.border }]}>
           <View style={styles.legacyLabelWrap}>
             <Text style={[settingsStyles.infoLabel, { color: colors.textPrimary }]}>
@@ -279,12 +293,12 @@ export function LibrarySyncCard() {
           {showSync && (
             <Pressable
               onPress={handleForceResync}
-              disabled={offlineMode}
+              disabled={syncBlocked}
               style={({ pressed }) => [
                 settingsStyles.actionRowButton,
                 { backgroundColor: colors.primary },
-                pressed && !offlineMode && settingsStyles.pressed,
-                offlineMode && settingsStyles.disabled,
+                pressed && !syncBlocked && settingsStyles.pressed,
+                syncBlocked && settingsStyles.disabled,
               ]}
             >
               <Ionicons name="refresh-circle-outline" size={18} color="#fff" />
@@ -296,7 +310,7 @@ export function LibrarySyncCard() {
           {(isSyncing || isPaused) &&
             secondaryButton(handleRestart, 'refresh-circle-outline', t('restartSync'), 'restart')}
         </View>
-        {offlineMode && <OfflineNotice text={t('syncLibraryOfflineNotice')} />}
+        {offlineMode && !reidDeferred && <OfflineNotice text={t('syncLibraryOfflineNotice')} />}
         <Text style={[settingsStyles.sectionHint, { color: colors.textSecondary }]}>
           {t('syncLibraryDescription')}
         </Text>

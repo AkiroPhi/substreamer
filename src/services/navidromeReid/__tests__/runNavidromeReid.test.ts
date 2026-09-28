@@ -114,7 +114,12 @@ jest.mock('../../dataModelUpgradeService', () => ({
 }));
 
 import { migrationGateStore } from '../../../store/migrationGateStore';
-import { runNavidromeReidIfNeeded } from '../runNavidromeReid';
+import {
+  acceptMidSessionReid,
+  declineMidSessionReid,
+  resetMidSessionAcceptanceForTests,
+  runNavidromeReidIfNeeded,
+} from '../runNavidromeReid';
 
 beforeEach(() => {
   mockCalls.length = 0;
@@ -126,6 +131,7 @@ beforeEach(() => {
   mockServerAnswered = true;
   mockEtlInFlight = null;
   mockLog.mockClear();
+  resetMidSessionAcceptanceForTests();
   mockSetReidState.mockClear();
   mockStorage.clear();
   mockStorageDropWrites = false;
@@ -307,6 +313,7 @@ describe('without a server to refill from', () => {
   mockServerAnswered = true;
   mockEtlInFlight = null;
   mockLog.mockClear();
+  resetMidSessionAcceptanceForTests();
     await runNavidromeReidIfNeeded();
     expect(mockCalls).toContain('discardLibrary');
     expect(mockCalls).toContain('setReidState:complete');
@@ -342,5 +349,94 @@ describe('the blob ETL race', () => {
   });
 });
 
+describe('interrupting a live session', () => {
+  // A cold start just runs — the user is sat at a splash expecting startup work. Mid
+  // session they may be listening, and the pass clears the queue, discards the library
+  // and cannot be paused once started. So it is offered, not imposed.
+  it('offers rather than starting when the app is already running', async () => {
+    await runNavidromeReidIfNeeded({ midSession: true });
+
+    expect(mockCalls).toEqual([]);
+    expect(migrationGateStore.getState().mode).toBe('offering');
+    expect(migrationGateStore.getState().visible).toBe(true);
+  });
+
+  it('runs straight through on a cold start', async () => {
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toContain('discardLibrary');
+    expect(migrationGateStore.getState().mode).not.toBe('offering');
+  });
+
+  it('runs once the user accepts', async () => {
+    await runNavidromeReidIfNeeded({ midSession: true });
+    expect(mockCalls).toEqual([]);
+
+    await acceptMidSessionReid();
+
+    expect(mockCalls).toContain('discardLibrary');
+    expect(mockCalls).toContain('setReidState:complete');
+  });
+
+  // Declining must cost nothing: the marker stays pending so the next launch runs it.
+  it('writes nothing when the user declines, and leaves the marker alone', async () => {
+    await runNavidromeReidIfNeeded({ midSession: true });
+
+    declineMidSessionReid();
+
+    expect(mockCalls).toEqual([]);
+    expect(mockSetReidState).not.toHaveBeenCalled();
+    expect(migrationGateStore.getState().visible).toBe(false);
+  });
+});
 
 
+
+
+
+// A deferred pass leaves the app working but stale, and blocks every library write for
+// the session. This flag is what lets a surface say so instead of leaving the user with
+// sync controls that accept a tap and do nothing.
+describe('reporting that the pass was deferred', () => {
+  it('raises the flag when there is no confirmed server', async () => {
+    mockServerAnswered = false;
+
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toEqual([]);
+    expect(migrationGateStore.getState().deferred).toBe(true);
+  });
+
+  it('raises the flag when the user declines mid-session', async () => {
+    await runNavidromeReidIfNeeded({ midSession: true });
+    declineMidSessionReid();
+
+    expect(migrationGateStore.getState().deferred).toBe(true);
+  });
+
+  it('lowers it once the pass actually runs', async () => {
+    mockServerAnswered = false;
+    await runNavidromeReidIfNeeded();
+    expect(migrationGateStore.getState().deferred).toBe(true);
+
+    mockServerAnswered = true;
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toContain('discardLibrary');
+    expect(migrationGateStore.getState().deferred).toBe(false);
+  });
+
+  // We deferred because nothing could answer; the server then answered pre-0.64. The
+  // pass is not needed, so the claim of a pending update has to be withdrawn.
+  it('lowers it when a late answer says the pass was never needed', async () => {
+    mockServerAnswered = false;
+    await runNavidromeReidIfNeeded();
+    expect(migrationGateStore.getState().deferred).toBe(true);
+
+    mockVerdict = 'skip';
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toEqual([]);
+    expect(migrationGateStore.getState().deferred).toBe(false);
+  });
+});

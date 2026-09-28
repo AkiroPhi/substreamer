@@ -34,9 +34,13 @@ interface MigrationGateProps {
   onConfirm?: () => void;
   /** Re-run after a failure. */
   onRetry?: () => void;
+  /** The user accepted the mid-session offer. */
+  onOfferAccept?: () => void;
+  /** The user chose Later; the pass runs at the next launch instead. */
+  onOfferDecline?: () => void;
 }
 
-function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.ReactElement | null {
+function MigrationGateInner({ onConfirm, onRetry, onOfferAccept, onOfferDecline }: MigrationGateProps): React.ReactElement | null {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -105,6 +109,58 @@ function MigrationGateInner({ onConfirm, onRetry }: MigrationGateProps): React.R
               <Text style={styles.primaryButtonLabel}>{t('migrationCompleteContinue')}</Text>
             </Pressable>
           </Animated.View>
+        </View>
+      </View>
+    );
+  }
+
+  // We know it is needed — but the app is already running and someone may be listening.
+  // A cold start just runs (they are sat at a splash expecting startup work); taking the
+  // screen away mid-session is a different matter, so it is offered, not imposed.
+  if (mode === 'offering') {
+    return (
+      <View
+        style={[
+          styles.root,
+          {
+            backgroundColor: colors.background,
+            paddingTop: insets.top + 24,
+            paddingBottom: insets.bottom + 24,
+          },
+        ]}
+      >
+        <View style={styles.content}>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>
+            {t('migrationOfferTitle')}
+          </Text>
+          <Text style={[styles.body, { color: colors.textSecondary }]}>
+            {t('migrationOfferBody')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            testID="migration-gate-offer-confirm"
+            onPress={() => { onOfferAccept?.(); }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+            ]}
+          >
+            <Text style={styles.primaryButtonLabel}>{t('migrationOfferConfirm')}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            testID="migration-gate-offer-decline"
+            onPress={() => { onOfferDecline?.(); }}
+            style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={[styles.secondaryButtonLabel, { color: colors.textSecondary }]}>
+              {t('migrationOfferDecline')}
+            </Text>
+          </Pressable>
+          {/* Say what "Later" costs. It is not free — the library stays as it is. */}
+          <Text style={[styles.body, { color: colors.textSecondary, fontSize: 12 }]}>
+            {t('migrationOfferDeclineHint')}
+          </Text>
         </View>
       </View>
     );

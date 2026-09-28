@@ -29,7 +29,9 @@ import { AddToPlaylistSheet } from '../components/AddToPlaylistSheet';
 import { BookmarkNameSheet } from '../components/BookmarkNameSheet';
 import { MigrationGate } from '../components/MigrationGate';
 import {
+  acceptMidSessionReid,
   confirmAndRunNavidromeReid,
+  declineMidSessionReid,
   retryNavidromeReid,
 } from '../services/navidromeReid/runNavidromeReid';
 import { RootErrorBoundary } from '../components/RootErrorBoundary';
@@ -945,6 +947,8 @@ export default function RootLayout() {
       <MigrationGate
         onConfirm={() => { void confirmAndRunNavidromeReid(); }}
         onRetry={() => { void retryNavidromeReid(); }}
+        onOfferAccept={() => { void acceptMidSessionReid(); }}
+        onOfferDecline={() => { declineMidSessionReid(); }}
       />
       </RootErrorBoundary>
       </ThemeProvider>
