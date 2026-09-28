@@ -1,5 +1,194 @@
 # Changelog
 
+## [8.1.0] - 2026-09-28
+
+- ci: update coverage badge [skip ci]
+- fix(sim-snapshots): actually track verify.sh
+- fix(route-picker): ask for Local Network in-app instead of pointing at Settings
+- fix(navidrome-reid): stop re-warming artwork the pass cannot possibly key right
+- test(fixtures): verify against the captured install, headless and on device
+- fix(db): delete the recovery batch that rolled back other callers' writes
+- fix(navidrome-reid): settle discardLibrary's own writes before returning
+- fix(navidrome-reid): prove the ETL stamp stuck, and stop swallowing KV write failures
+- ci: update coverage badge [skip ci]
+- fix(ci): banned localeCompare, and an npm script that runs the real CI
+- fix(logout): clear every kept table, and clear the image queue in the re-key
+- fix(image-cache): an orphaned refresh cycle blocked every future refresh
+- feat(navidrome-reid): say what happens next on the completion screen
+- fix(navidrome-reid): downloaded cover art, silent logging, re-warm ordering
+- fix(navidrome-reid): run on the launch that matters, and refuse writes until it does
+- fix(navidrome-reid): the final review round
+- docs(navidrome-reid): pin why the id map is never dropped at pass start
+- docs(sim-snapshots): album directory renaming is near-unreachable, not a gap
+- chore(sim-snapshots): a home for repeatable simulator fixtures
+- fix(navidrome-reid): re-key the id inside a song:<id> item key
+- fix(navidrome-reid): the remaining collision sweeps
+- fix(navidrome-reid): eight blockers from the orchestrator review
+- feat(navidrome-reid): KV blobs, and drop the id map on logout
+- feat(navidrome-reid): the file move and the orchestrator
+- fix(navidrome-reid): envelope ids the map never saw, and legacy song_json
+- feat(navidrome-reid): the SQL re-key — map, clusters, embedded ids
+- feat(navidrome-reid): artwork-token and JSON-envelope rewriters
+- feat(navidrome-reid): the column allowlist, with a drift guard
+- feat(navidrome-reid): three-way verdict — run, skip, or ask the user
+- feat(migration-gate): blocking screen between the splash and the app
+- fix(navidrome-reid): fail closed on an undecidable server version
+- feat(navidrome-reid): refuse headless content while the re-key is pending
+- feat(navidrome-reid): port the 0.64 canonical-id transform and the trigger
+- fix(downloads): refuse to prune a cached playlist on a suspect track list
+- docs(agents): released tag is the migration baseline, not master
+- feat: upgrade to react-native-queue-player 2.0.1
+- android: proguard updates
+- feature: add 1 track cache ahead option
+- fix(android): move the feature-flag override where it can actually run
+- perf(player): stop rendering the now-playing bars when nothing can see them
+- fix(expo-scroll-to-top): use the local-module gradle idiom
+- docs: outstanding device test plan
+- feat(library): decline the status-bar tap so lists reset instead of flying
+- fix(library): size the alphabet scroller to the space it has
+- fix(sync): a sync paused by errors stays paused
+- fix(sync): log what the run pulled, not just what the DB holds
+- fix(sync): page by the count requested, end on a short page
+- docs: record verified Subsonic server paging behaviour
+- feat(sync): let the user force the per-album sync path
+- fix(image-cache): reconcile a directory name back to its cover-art id
+- fix(downloads): grabbing a drag handle no longer scrolls the queue list
+- ci: update coverage badge [skip ci]
+- fix(downloads): stop the download banner depending on its entrance animation
+- fix(downloads): show star ratings under the Downloaded filter
+- fix(downloads): a track played from the Downloaded filter keeps its metadata
+- perf(analytics): build a full track only for the songs on screen
+- docs: say what things are instead of calling them seams
+- test: the SQLite substitute defers batches like the real one
+- fix(downloads): wait for a queue item's songs before downloading it
+- test: drop ticket numbers from test names
+- docs: take the worklog out of the code comments
+- test: the image cache tables run on real SQL
+- feat(db): overrides and scrobble exclusions become rows
+- feat(favorites): the remainder holds columns, not envelopes
+- docs(agents): an old migration is frozen at the model it was written for
+- docs(agents): migrations run in order, once, and never after
+- perf(downloads): the queue stores its songs as rows
+- perf(downloads): stop carrying the legacy envelope through memory
+- fix(downloads): offline results carry the whole track, not seven fields
+- docs(agents): our comments are beliefs, not authority
+- refactor(downloads): only the migration reads the legacy envelope
+- feat(db): drop the scrobble envelope columns
+- test: put the data layer on real SQL and in the coverage gate
+- feat(sync): drop library rows the server no longer has
+- feat(sync): earn an epoch only from a full run that finished
+- feat(db): stamp albums and songs with when they were last written
+- fix(sync): an empty album page has to repeat before it ends the walk
+- fix(sync): one deleted album no longer stalls the library forever
+- feat(db): genres and shares move to tables
+- feat(bookmarks): migrate the saved queues out of KV
+- fix(bookmarks): restore writes through to the snapshot rows
+- feat(bookmarks): write saved queues through to the snapshot table
+- perf(player): a track change stops rewriting the whole queue
+- feat(db): one snapshot table for the queue and for bookmarks
+- feat(lyrics): browse and manage the cached lyrics
+- fix(lyrics): fetch only while a player is on screen and in front
+- feat(lyrics): store lyrics in their own table, keyed by song
+- feat(scrobbles): the pending queue snapshots the track too
+- feat(scrobbles): write the track snapshot, not the envelope
+- refactor(scrobbles): read the history from columns, not the envelope
+- fix(scrobbles): backfill the new columns and the child tables
+- feat(db): scrobble_events snapshots the whole track
+- refactor(db): one Child-to-columns mapping, shared by snapshot tables
+- refactor(scrobbles): delete the unused sync history reader
+- fix: pull-to-refresh refreshes the source, not the filtered view
+- refactor(sync): drop forceStrategy, which now served only a test
+- chore: delete the db rebuild spikes
+- chore: clear the findings backlog from the comment sweep
+- fix(home): stop the carousels anchoring to content that moved
+- test: give async waits a budget the parallel suite can meet
+- refactor(sort): the scroller letter comes from the stored key
+- refactor(sort): songs sort in SQL too
+- refactor(sort): one sort order, in SQL
+- perf(library): convert album rows once per row, not once per page
+- docs(detail): state the real write-ordering constraint
+- docs(hooks,utils,app): trim comment narration
+- docs(ui): trim comment narration in components and screens
+- docs(services): trim comment narration in the service layer
+- docs(store): trim comment narration in the store layer
+- docs(db): trim comment narration in the db layer
+- docs(agents): comments say what a reader needs, not how it was found
+- fix(sync): stop marking the song sync complete over a partial library
+- chore(sync): temporary instrumentation for the missing-songs walk
+- fix(favorites): starred lists reload when a download completes
+- fix(ui): say when a filter emptied a list, not that you own nothing
+- refactor(store): delete the cache-walking downloaded helpers
+- fix(downloads): downloaded songs carried a directory id as their album
+- perf(library): the downloaded songs list reads SQL
+- perf(downloads): the last two membership reads answer from SQL
+- perf(search): downloaded membership answers from SQL, not the item map
+- docs(agents): allow local commits, forbid lazy requires everywhere
+- perf(library): downloaded album and playlist lists read SQL
+- feat(db): add downloads repository and drop the downloaded-artist filter
+- feat(store): add a change counter to musicCacheStore
+- refactor(services): import project modules directly, never lazily
+- docs: record the data-model rules learned building A2
+- feat(db): home album lists read from SQL instead of a persisted blob
+- fix(db): stop partial payloads blanking album rows they don't own
+- docs: make AGENTS.md the single source of rules, correct its facts
+- test(db): add Spike K — the savepoint window, on device
+- docs(db): correct the docblocks the mutex left behind
+- refactor(db): delete the write-serialization mutex
+- fix(db): move the last two runtime writers off JS-thread transactions
+- fix(db): stop re-ensuring the normalized schema at runtime
+- fix(db): quiesce the write pool before logout's JS-thread BEGIN
+- fix(db): close the savepoint window on a failed atomic batch
+- fix(downloads): enforce unique queue positions, stop renumbering them
+- fix(db): stop position shifts colliding with their own primary key
+- fix(playlist): drop the dead-end Remove Download on playlist tracks
+- fix(db): retire the last transactions held across a JS yield
+- fix(db): make multi-statement writes atomic without yielding
+- feat(logout): show progress, and clear the history behind login
+- feat(favourites): move favourites off the KV blob onto SQL
+- fix(sync): trigger the online backfill on song-phase and album gaps
+- refactor(db): retire the legacy blob-table modules
+- refactor(migration): make the blob ETL self-sufficient
+- fix(migration): recover the pre-table album library, drop two dead migrations
+- feat(db): library reads return full-fidelity rows
+- feat(db): downloads carry typed columns, not a JSON envelope
+- fix(artist): show all fetched top songs, not the first 20
+- fix(ios): declare local network usage so fresh installs can reach LAN servers
+- fix(library): restore artistId on the lean song projection
+- fix(artist): show a spinner while the biography resolves
+- fix(backup): restore sheet uses the shared BottomSheet so long lists scroll
+- refactor(store): delete the legacy library/detail stores
+- feat(db): split artist detail into per-part tables with independent freshness
+- fix(auth): only logout clears — a second address is not a second server
+- feat(data): local-first detail reads, offline download gating, phase 5 cutover
+- fix(sync): restore the playlist detail reconcile, on its own markers
+- feat(settings): remove the metadata cache surfaces
+- feat(sync-card): show which transport a running sync is using
+- feat(db): move album info into its own normalized table
+- style(sync-card): shorten the hint
+- feat(sync-card): drop the resync confirm, reword the hint
+- style(sync-card): centre the progress count, drop the trailing noun
+- fix(sync): derive song-phase progress from the resume cursor
+- fix(sync): resume an interrupted album phase, drop the stale upgrade seed
+- refactor(sync): route the album path through the normalized sync
+- refactor(sync): move artist/playlist list refresh off the doomed stores
+- fix(my-listening): show Top Albums covers on first paint
+- fix(intl): use defaultCollator in useAllSongsByTitle
+- fix(sync): prune stale artists, and stop the boot migration re-importing blobs
+- refactor(db): one schema mechanism — kept tables move into schema.ts
+- fix(sync): make a full resync non-destructive
+- fix(sync): never prune playlists on an empty API response
+- feat(db): normalized detail reads + shared detail fetch service
+- feat(db): cut library browse + search over to the normalized model
+- feat(db): repository searchX — tiered fuzzy search over normalized tables (Phase 2.2)
+- feat(db): bidirectional keyset paging (scroll both ways after an A-Z jump)
+- feat(db): artists + playlists repository (Phase 2.2)
+- feat(db): Phase 2 normalized persistence + drop expo-sqlite
+- fix(boot): guard expo-router setState race + drop per-boot WAL checkpoint
+- feat(db): swap the SQLite engine to op-SQLite (behavior-identical)
+- feat(db): op-SQLite deps + better-sqlite3 test seam + Phase-0 spikes
+- ci: update coverage badge [skip ci]
+- chore: release notes
+- ci: update coverage badge [skip ci]
 ## [8.0.91] - 2026-07-23
 
 - chore: deps
