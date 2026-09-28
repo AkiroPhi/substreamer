@@ -34,6 +34,7 @@ import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
 import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
+import { cannotAskNow } from './reidProbe';
 import { reidVerdict, setReidState, setUserConfirmedReid } from './reidMarker';
 import { MIGRATION_DONE_KEY, MIGRATION_VERSION } from '../normalizedMigrationKey';
 import {
@@ -55,6 +56,22 @@ let inFlight: Promise<void> | null = null;
  */
 export function runNavidromeReidIfNeeded(): Promise<void> {
   if (inFlight) return inFlight;
+
+  // Nothing about this pass is safe without a server to refill from. It discards the
+  // whole library and depends on the sync that follows to rebuild it, so running it
+  // offline empties the app and leaves it empty — measured on a fixture with in-app
+  // offline mode on and a persisted 0.64 version: "library discarded (45 tables)",
+  // marker stamped complete, songs 0, albums 0, and no sync able to run. The marker
+  // then prevents a retry. The `ask` prompt is worse still: it appears offline and a
+  // "yes" confirms straight into the same thing.
+  //
+  // Deliberately checked HERE and not folded into `reidVerdict`: the verdict answers
+  // "does this install need the re-key", which is still true offline. This answers
+  // "may it run right now", which is a different question with a different lifetime.
+  if (cannotAskNow()) {
+    logLibrarySync('[reid] deferred — offline or server unreachable; nothing could refill the library');
+    return Promise.resolve();
+  }
 
   const verdict = reidVerdict();
   if (verdict === 'skip') return Promise.resolve();

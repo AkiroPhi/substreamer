@@ -8,6 +8,7 @@
  */
 
 import { connectivityStore } from '../../store/connectivityStore';
+import { offlineModeStore } from '../../store/offlineModeStore';
 import { getApi } from '../subsonicService';
 import { currentServerInfo, isReidComplete, markProbeSettled, setProbedVersion } from './reidMarker';
 
@@ -35,6 +36,21 @@ export function resetReidProbeInFlightForTests(): void {
  * call, and the library sync would then succeed over the very network the timeout implied
  * was broken. With ping alone, a timeout genuinely means the server is unreachable.
  */
+/**
+ * True when this device must not, or cannot, reach the server right now.
+ *
+ * `offlineMode` is read explicitly rather than inferred from `getApi()` returning null:
+ * it is a deliberate user choice on a device that may be perfectly connected, and it is
+ * the branch that actually fires on an offline launch. The connectivity flags default
+ * optimistically to `true` and are only monitored while offline mode is OFF, so they
+ * never catch this case on their own.
+ */
+export function cannotAskNow(): boolean {
+  if (offlineModeStore.getState().offlineMode) return true;
+  const conn = connectivityStore.getState();
+  return !conn.hasConnection || !conn.isServerReachable;
+}
+
 export function probeServerVersion(): Promise<void> | null {
   if (probeInFlight) return probeInFlight;
   if (probeDone) return null;
@@ -49,22 +65,26 @@ export function probeServerVersion(): Promise<void> | null {
     return null;
   }
 
-  // Known-unreachable: do not hold the splash for a request that cannot arrive. `getApi`
-  // is null only in OFFLINE MODE, not merely off-network, so without this an off-LAN
-  // launch waits out the whole timeout on every start. Settling here is safe for the
-  // same reason a timeout is — nothing can sync over a connection that is not there.
-  const conn = connectivityStore.getState();
-  if (!conn.hasConnection || !conn.isServerReachable) {
-    markProbeSettled();
-    probeDone = true;
-    return null;
-  }
+  // We must not, or cannot, ask right now. Return `null` so nothing waits — but do NOT
+  // settle, and do not create `probeInFlight`.
+  //
+  // Settling here was a real hole. The verdict then fell back to the PERSISTED server
+  // version for the rest of the session, `shouldBlockLibraryWrites()` went false, and a
+  // later call returned early because `probeDone` was already true — so leaving offline
+  // mode never re-asked. "Nothing can sync over a connection that is not there" was
+  // wrong on both counts: in-app offline mode is a user choice on a connected device,
+  // and the user can revoke it mid-session.
+  //
+  // Returning before the IIFE matters too: settling inside the `finally` instead would
+  // leave `probeInFlight` pointing at a resolved promise, which the guard above hands
+  // back forever — the same never-re-probes bug, with writes stuck off.
+  if (cannotAskNow()) return null;
 
+  let unaskable = false;
   probeInFlight = (async () => {
     try {
-      // Null in offline mode, where there is no sync to protect against anyway.
       const api = getApi();
-      if (!api) return;
+      if (!api) { unaskable = true; return; }
 
       const response = await withTimeout(api.ping(), PROBE_TIMEOUT_MS);
       // `serverVersion` only exists on the OpenSubsonic variant of the response, so it is
@@ -77,10 +97,13 @@ export function probeServerVersion(): Promise<void> | null {
       // Unreachable or malformed: the persisted version stands, and Layer 1 keeps
       // refusing library writes for as long as the verdict says a re-key is outstanding.
     } finally {
-      // Settled either way. An unreachable server must not block writes forever — and it
-      // cannot serve a sync either, so there is nothing to protect against.
-      markProbeSettled();
-      probeDone = true;
+      // Settle only on a real outcome: the server answered, or was asked and failed or
+      // timed out. A timeout still settles, so an unreachable server cannot block writes
+      // forever. Never settle when we did not ask at all.
+      if (!unaskable) {
+        markProbeSettled();
+        probeDone = true;
+      }
       probeInFlight = null;
     }
   })();

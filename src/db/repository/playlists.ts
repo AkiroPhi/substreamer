@@ -1,3 +1,4 @@
+import { shouldBlockLibraryWrites } from '../../services/navidromeReid/reidMarker';
 /** Playlists repository: bulk upsert (row + allowed users), list, count, by-id,
  *  and the ordered `playlist_songs` membership junction. */
 import type { Playlist } from 'subsonic-api';
@@ -80,7 +81,13 @@ export function upsertPlaylists(
   playlists: Playlist[],
   onProgress?: (done: number, total: number) => void,
   articles?: readonly string[],
+  opts?: { fromMigration?: boolean },
 ): Promise<number> {
+  // Same Navidrome re-key guard as `upsertSongs` / `upsertAlbums`: artist and playlist
+  // ids are re-keyed by the pass and discarded with the rest of the library, so a
+  // server-sourced write here lands current ids in an install still holding retired
+  // ones. `detailFetchService` writes both in exactly that window.
+  if (!opts?.fromMigration && shouldBlockLibraryWrites()) return Promise.resolve(0);
   return bulkUpsert(
     db,
     {

@@ -167,7 +167,7 @@ async function migrateArtists(
 ): Promise<TableMigration> {
   const lib = await readKvState<{ artists?: ArtistID3[] }>(db, ARTIST_LIBRARY_KEY);
   const libraryArtists = lib?.artists ?? [];
-  let migrated = libraryArtists.length ? await upsertArtists(db, libraryArtists, undefined, articles) : 0;
+  let migrated = libraryArtists.length ? await upsertArtists(db, libraryArtists, undefined, articles, FROM_MIGRATION) : 0;
 
   // Detail cache: ensure a row exists for any opened-but-not-in-list artist, then write
   // its images/similar (upsertArtistInfo), its top songs (rows + ordered junction), and
@@ -176,7 +176,7 @@ async function migrateArtists(
   const det = await readKvState<{ artists?: Record<string, ArtistDetailLite> }>(db, ARTIST_DETAILS_KEY);
   const entries = det?.artists ? Object.values(det.artists) : [];
   const detailArtists = entries.map((e) => e?.artist).filter((a): a is ArtistID3 => !!a?.id);
-  if (detailArtists.length) migrated += await upsertArtists(db, detailArtists, undefined, articles);
+  if (detailArtists.length) migrated += await upsertArtists(db, detailArtists, undefined, articles, FROM_MIGRATION);
   for (const e of entries) {
     const id = e?.artist?.id;
     if (!id) continue;
@@ -233,7 +233,7 @@ async function migratePlaylists(
 ): Promise<TableMigration> {
   const lib = await readKvState<{ playlists?: Playlist[] }>(db, PLAYLIST_LIBRARY_KEY);
   const libraryPlaylists = lib?.playlists ?? [];
-  const migrated = libraryPlaylists.length ? await upsertPlaylists(db, libraryPlaylists, undefined, articles) : 0;
+  const migrated = libraryPlaylists.length ? await upsertPlaylists(db, libraryPlaylists, undefined, articles, FROM_MIGRATION) : 0;
 
   const det = await readKvState<{ playlists?: Record<string, PlaylistDetailLite> }>(db, PLAYLIST_DETAILS_KEY);
   const detEntries = det?.playlists ? Object.entries(det.playlists) : [];
@@ -242,7 +242,7 @@ async function migratePlaylists(
     if (!pl) continue;
     // Ensure the parent row exists (FK) even if the playlist isn't in the list.
     // eslint-disable-next-line no-await-in-loop
-    await upsertPlaylists(db, [pl], undefined, articles);
+    await upsertPlaylists(db, [pl], undefined, articles, FROM_MIGRATION);
     // Upsert the member songs FIRST so `playlist_songs JOIN songs` resolves: a playlist
     // can hold tracks from albums the library never fully synced (absent from
     // `song_index`); without this they'd be silently dropped from the offline playlist.

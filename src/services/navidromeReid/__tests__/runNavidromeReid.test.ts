@@ -69,6 +69,9 @@ jest.mock('../reidLibrary', () => ({
   discardLibrary: () => { mockCalls.push('discardLibrary'); return Promise.resolve(45); },
 }));
 
+let mockCannotAsk = false;
+jest.mock('../reidProbe', () => ({ cannotAskNow: () => mockCannotAsk }));
+
 let mockVerdict = 'run';
 const mockSetReidState = jest.fn((s: string) => mockCalls.push(`setReidState:${s}`));
 jest.mock('../reidMarker', () => ({
@@ -109,6 +112,7 @@ beforeEach(() => {
   mockFkOk = true;
   mockFileResult = { moved: 44, missing: 0, failed: 0 };
   mockVerdict = 'run';
+  mockCannotAsk = false;
   mockSetReidState.mockClear();
   mockStorage.clear();
   mockStorageDropWrites = false;
@@ -225,4 +229,40 @@ describe('the blob-ETL completion stamp', () => {
     expect(migrationGateStore.getState().failed).toBe(true);
   });
 });
+
+describe('without a server to refill from', () => {
+  // Measured on a fixture with in-app offline mode on and a persisted 0.64 version: the
+  // pass ran, logged "library discarded (45 tables)", stamped the marker complete, and
+  // left songs=0 albums=0 with no sync able to run. Downloads survived, everything else
+  // was gone, and the marker then prevented any retry.
+  it('refuses to run at all when offline or unreachable', async () => {
+    mockCannotAsk = true;
+
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toEqual([]);
+    expect(mockCalls).not.toContain('discardLibrary');
+    expect(mockSetReidState).not.toHaveBeenCalled();
+    expect(migrationGateStore.getState().visible).toBe(false);
+  });
+
+  // Worse than running silently: the prompt appears and a "yes" confirms straight into
+  // the same destruction.
+  it('does not even show the ask prompt when there is no server', async () => {
+    mockCannotAsk = true;
+    mockVerdict = 'ask';
+
+    await runNavidromeReidIfNeeded();
+
+    expect(migrationGateStore.getState().visible).toBe(false);
+  });
+
+  it('runs normally once a server is reachable again', async () => {
+    mockCannotAsk = false;
+    await runNavidromeReidIfNeeded();
+    expect(mockCalls).toContain('discardLibrary');
+    expect(mockCalls).toContain('setReidState:complete');
+  });
+});
+
 

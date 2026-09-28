@@ -19,6 +19,11 @@ jest.mock('../../subsonicService', () => ({
   }),
 }));
 
+let mockOfflineMode = false;
+jest.mock('../../../store/offlineModeStore', () => ({
+  offlineModeStore: { getState: () => ({ offlineMode: mockOfflineMode }) },
+}));
+
 let mockHasConnection = true;
 let mockServerReachable = true;
 jest.mock('../../../store/connectivityStore', () => ({
@@ -55,6 +60,7 @@ beforeEach(() => {
   mockPing = { status: 'ok', serverVersion: '0.64.0 (1072e9f7)' };
   mockPingDelayMs = 0;
   mockApiNull = false;
+  mockOfflineMode = false;
   mockHasConnection = true;
   mockServerReachable = true;
   resetReidProbeForTests();
@@ -224,11 +230,28 @@ describe('the live version probe', () => {
     expect(shouldBlockLibraryWrites()).toBe(false);
   });
 
-  it('settles in offline mode without a request', async () => {
-    mockApiNull = true;
+  // Offline mode is a user choice on a possibly-connected device, and it can be revoked
+  // mid-session. Claiming an answer we never asked for let the stale persisted version
+  // decide, turned every write guard off, and made the next call skip re-probing.
+  it('does NOT settle in offline mode, and keeps writes blocked', async () => {
+    mockOfflineMode = true;
     mockServerVersion = '0.61.2 (aa84e645)';
+
+    expect(probeServerVersion()).toBeNull();
+    expect(shouldBlockLibraryWrites()).toBe(true);
+  });
+
+  it('re-probes for real once offline mode is turned off', async () => {
+    mockOfflineMode = true;
+    mockServerVersion = '0.61.2 (aa84e645)';
+    expect(probeServerVersion()).toBeNull();
+
+    mockOfflineMode = false;
     await (probeServerVersion() ?? Promise.resolve());
-    expect(shouldBlockLibraryWrites()).toBe(false);
+
+    // The server said 0.64, so the stale persisted 0.61 no longer decides.
+    expect(reidVerdict()).toBe('run');
+    expect(shouldBlockLibraryWrites()).toBe(true);
   });
 
   it('never blocks writes for a non-Navidrome server', () => {
@@ -247,11 +270,21 @@ describe('the live version probe', () => {
     expect(reidVerdict()).toBe('run');
   });
 
-  it('does not hold the splash when the server is known unreachable', () => {
+  it('does not hold the splash when the server is unreachable, but stays unsettled', () => {
     mockServerVersion = '0.61.2 (aa84e645)';
     mockServerReachable = false;
-    // null means "nothing to wait for" — the caller proceeds in the same tick.
+    // null means "nothing to wait for" — the caller proceeds in the same tick — but we
+    // have no answer, so writes stay refused until we can actually ask.
     expect(probeServerVersion()).toBeNull();
+    expect(shouldBlockLibraryWrites()).toBe(true);
+  });
+
+  // A timeout is different from never asking: the server WAS asked and did not answer,
+  // so it must settle or an unreachable server would block writes forever.
+  it('settles on a real timeout', async () => {
+    mockServerVersion = '0.61.2 (aa84e645)';
+    mockPing = new Error('unreachable');
+    await (probeServerVersion() ?? Promise.resolve());
     expect(shouldBlockLibraryWrites()).toBe(false);
   });
 

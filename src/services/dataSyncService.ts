@@ -24,6 +24,7 @@ import { downloadedMetadataRefreshStore } from '../store/downloadedMetadataRefre
 import { refreshDownloadedMetadata } from './downloadedMetadataService';
 import { logLibrarySync } from './librarySyncLogger';
 import { probeServerVersion } from './navidromeReid/reidProbe';
+import { runNavidromeReidIfNeeded } from './navidromeReid/runNavidromeReid';
 import { shouldBlockLibraryWrites } from './navidromeReid/reidMarker';
 import { serverInfoStore } from '../store/serverInfoStore';
 import { syncStatusStore, type SyncScope } from '../store/syncStatusStore';
@@ -228,7 +229,14 @@ async function startupOrResumeFlow(): Promise<void> {
   if (shouldBlockLibraryWrites()) {
     // The ids this fan-out would write do not match the ones the rest of the install
     // holds. Writing both is what doubles the library.
-    logLibrarySync('[reid] startup fan-out refused — re-key outstanding');
+    //
+    // Refusing is not enough on its own. This is the ONLY path that re-probes, and the
+    // pass is otherwise reachable only from the splash — so a user who launches in
+    // offline mode and then turns it off would land here, be refused, and sit online
+    // with no sync, no interstitial and no banner until they relaunched. Offer the pass
+    // instead: the gate renders mid-session, and startup resumes when it finishes.
+    logLibrarySync('[reid] startup fan-out refused — re-key outstanding; offering the pass');
+    void runNavidromeReidIfNeeded();
     return;
   }
 

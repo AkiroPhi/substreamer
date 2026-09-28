@@ -234,8 +234,9 @@ export function upsertAlbums(
   articles?: readonly string[],
   opts?: { merge?: boolean; fromMigration?: boolean },
 ): Promise<number> {
-  // Fail-safe net for Layer 1 of the Navidrome re-key. Every server-sourced library write
-  // funnels through here, so a caller that was missed refuses rather than writing current
+  // Fail-safe net for Layer 1 of the Navidrome re-key. The bulk entity writes all funnel
+  // through here and its siblings in `artists.ts` / `playlists.ts`, so a caller that was
+  // missed refuses rather than writing current
   // ids into an install whose ids are still the retired ones — the mix is what doubles the
   // library. The migration chain passes `fromMigration`: its writes come from LOCAL blobs
   // whose ids are legitimately the old ones, and blocking those would break the chain.
