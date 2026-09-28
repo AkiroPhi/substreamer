@@ -41,7 +41,6 @@ jest.mock('../../../store/persistence/imageDownloadQueueTable', () => ({
 jest.mock('../../imageCacheService', () => ({
   cancelImageRefreshCycle: () => { mockCalls.push('cancelImageRefreshCycle'); return Promise.resolve(); },
   clearImageCache: () => { mockCalls.push('clearImageCache'); return Promise.resolve(); },
-  enqueueImageRefreshCycle: () => { mockCalls.push('enqueueImageRefreshCycle'); return Promise.resolve(null); },
 }));
 
 let mockPairs = 3;
@@ -127,7 +126,6 @@ describe('the pass ordering', () => {
     // longer has - and the re-warm's ids collide with them.
     expect(idx('clearImageQueue')).toBeGreaterThan(-1);
     expect(idx('clearImageQueue')).toBeLessThan(idx('clearImageCache'));
-    expect(idx('clearImageQueue')).toBeLessThan(idx('enqueueImageRefreshCycle'));
     expect(idx('clearImageQueue')).toBeLessThan(idx('rekeyPlainColumns'));
   });
 
@@ -142,10 +140,19 @@ describe('the pass ordering', () => {
     expect(idx('discardLibrary')).toBeLessThan(idx('rehydrateAllStores'));
   });
 
-  it('re-warms artwork AFTER the rehydrate, so purge protection sees current state', async () => {
+  it('clears the image cache AFTER the rehydrate, so purge protection sees current state', async () => {
     await runNavidromeReidIfNeeded();
-    expect(idx('rehydrateAllStores')).toBeLessThan(idx('enqueueImageRefreshCycle'));
-    expect(idx('rebuildTrackMaps')).toBeLessThan(idx('enqueueImageRefreshCycle'));
+    expect(idx('rehydrateAllStores')).toBeLessThan(idx('clearImageCache'));
+    expect(idx('rebuildTrackMaps')).toBeLessThan(idx('clearImageCache'));
+  });
+
+  // It used to enqueue one here, and could only ever enqueue the WRONG keys: `albums` is
+  // empty at this point, so the snapshot fell back to bare entity ids the server does not
+  // serve. Covers repopulate on demand instead.
+  it('does not enqueue a re-warm cycle while the library is empty', async () => {
+    await runNavidromeReidIfNeeded();
+    expect(mockCalls).not.toContain('enqueueImageRefreshCycle');
+    expect(mockCalls).toContain('clearImageCache');
   });
 
   it('stamps complete last, after every step that can fail', async () => {

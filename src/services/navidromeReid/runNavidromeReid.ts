@@ -21,11 +21,7 @@
  * from the top. Every step is idempotent, so repeating is free.
  */
 
-import {
-  cancelImageRefreshCycle,
-  clearImageCache,
-  enqueueImageRefreshCycle,
-} from '../imageCacheService';
+import { cancelImageRefreshCycle, clearImageCache } from '../imageCacheService';
 import { flushLibrarySyncLog, logLibrarySync } from '../librarySyncLogger';
 import { migrationGateStore } from '../../store/migrationGateStore';
 import { rebuildTrackMaps } from '../musicCacheService';
@@ -289,11 +285,19 @@ async function clearDownloadQueue(db: ReturnType<typeof getDb>): Promise<void> {
  */
 async function refreshArtwork(): Promise<void> {
   // Drop any in-flight cycle FIRST: it clears both the queue rows and the cycle metadata,
-  // and a surviving `cycleId` would make the re-warm below return early as "cycle already
-  // active", leaving downloaded covers blank.
+  // and a surviving `cycleId` would block every future refresh.
   await cancelImageRefreshCycle();
   await clearImageCache({ reinit: false });
-  // Snapshots from SQL, so it sees the re-keyed ids regardless of store state. It kicks
-  // its own drain, which proceeds once the app is running.
-  await enqueueImageRefreshCycle('refresh-downloads');
+
+  // Deliberately NO re-warm cycle here. It used to enqueue one, and it could only ever
+  // enqueue the WRONG keys: this runs after `discardLibrary`, so `albums` is empty and
+  // there is no current cover-art token to snapshot. The snapshot fell back to the frozen
+  // `cached_items.cover_art_id` — bare entity ids, not the `al-<id>_<hash>` tokens the UI
+  // renders and the server serves — so every fetch failed, three failures in a row tripped
+  // the "purging cache rows" valve, and the covers stayed blank anyway.
+  //
+  // Cover art repopulates on demand instead: `CachedImage` calls `cacheAllSizes` for any
+  // key it cannot find locally, and the sync that follows this pass refills `albums` with
+  // the real tokens moments later. The user is necessarily online — the pass only runs
+  // against a live 0.64 server — so there is nothing to pre-warm for.
 }
