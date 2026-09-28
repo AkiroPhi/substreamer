@@ -145,6 +145,12 @@ export function awaitDbWritesIdle(): Promise<void> {
   return new Promise<void>((resolve) => idleWaiters.push(resolve));
 }
 
+/** Test seam: wrap a raw op-SQLite DB so a suite can run the real code against a
+ *  file-backed fixture instead of the in-memory default. Production opens via `openDb`. */
+export function adaptForTests(op: DB): InternalDb {
+  return adapt(op);
+}
+
 /** Adapt op-SQLite's DB to the `InternalDb` surface. `withTransactionSync` issues
  *  its BEGIN/COMMIT via `executeSync`; multi-statement ASYNC writes use
  *  `runAtomicBatchAsync` rather than a transaction spanning JS turns. */

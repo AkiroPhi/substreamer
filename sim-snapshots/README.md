@@ -96,7 +96,19 @@ Fixtures are valuable in proportion to how *unlike each other* they are. Worth c
 
 ## Automating against these
 
-The split worth keeping: anything **SQL-only** — the migration chain, a re-key, collision
-handling — runs headlessly against a restored database with no simulator at all, so it can
-run on every change. Anything touching **files or UI** needs a booted simulator and is
-slow. Keeping the two apart is what makes the cheap half worth running often.
+Both halves now exist.
+
+**Headless**, `src/db/__tests__/fixtureMigration.test.ts`: runs the real migration chain
+and the real blob-to-SQL ETL against a copy of a snapshot's database, with no simulator.
+Part of `npm test`, and skips itself when the snapshot is absent — so it guards locally and
+is silently absent in CI, where the gitignored data cannot exist.
+
+**On device**, `./verify.sh <label>`: restores a fixture, boots the app, waits for the
+chain and the re-key to settle, and asserts the end state — migration counter, ETL stamp,
+song count, legacy-id count, duplicates, downloaded rows and files.
+
+The division is not cosmetic. The headless half cannot see write-ordering races:
+better-sqlite3 applies synchronously, so the bug that lost the ETL completion stamp and
+doubled the library leaves every headless test green. Only repeated device cycles surface
+it — and *repeated* matters, since it failed 5 runs in 6 and one green run would have
+looked like proof.
