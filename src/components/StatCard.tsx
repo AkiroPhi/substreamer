@@ -1,7 +1,7 @@
 import Ionicons from "@react-native-vector-icons/ionicons/static";
-import { memo, useEffect } from 'react';
+import { memo } from 'react';
 import { StyleSheet, Text } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { type ThemeColors } from '../constants/theme';
 
@@ -14,22 +14,16 @@ interface StatCardProps {
   index?: number;
 }
 
+// `entering`, NOT a shared value starting at 0 driven by a mount-only effect. That shape
+// leaves the card at opacity 0 whenever the animation does not fire — and because the
+// effect's deps are all stable, nothing ever re-runs it, so the card stays invisible for
+// the life of the screen. Seen on Android by flipping the period a few times.
 export const StatCard = memo(function StatCard({ icon, value, label, colors, index = 0 }: StatCardProps) {
-  const opacity = useSharedValue(0);
-  const translateY = useSharedValue(12);
-
-  useEffect(() => {
-    opacity.value = withDelay(index * 80, withTiming(1, { duration: 400 }));
-    translateY.value = withDelay(index * 80, withTiming(0, { duration: 400 }));
-  }, [index, opacity, translateY]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-
   return (
-    <Animated.View style={[styles.card, { backgroundColor: colors.card }, animatedStyle]}>
+    <Animated.View
+      entering={FadeInDown.delay(index * 80).duration(400)}
+      style={[styles.card, { backgroundColor: colors.card }]}
+    >
       <Ionicons name={icon} size={20} color={colors.primary} style={styles.icon} />
       <Text style={[styles.value, { color: colors.textPrimary }]} numberOfLines={1}>
         {value}
