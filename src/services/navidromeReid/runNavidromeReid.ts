@@ -118,7 +118,7 @@ export function runNavidromeReidIfNeeded(opts: ReidRunOptions = {}): Promise<voi
     return Promise.resolve();
   }
 
-  inFlight = execute().finally(() => { inFlight = null; });
+  inFlight = execute(verdict).finally(() => { inFlight = null; });
   return inFlight;
 }
 
@@ -168,7 +168,11 @@ export function retryNavidromeReid(): Promise<void> {
   return runNavidromeReidIfNeeded();
 }
 
-async function execute(): Promise<void> {
+/**
+ * @param verdict The decision that triggered this run, captured before the marker moves.
+ *   Logging `reidVerdict()` after the fact reports `skip` on every completed pass.
+ */
+async function execute(verdict: string): Promise<void> {
   const gate = migrationGateStore.getState();
   gate.setDeferred(false);
   gate.show('working');
@@ -238,7 +242,11 @@ async function execute(): Promise<void> {
       setReidState('complete');
       gate.hide();
       logLibrarySync('[reid] nothing to do');
-      appendReidLog('nothing to do', ['every id was already canonical']);
+      appendReidLog('nothing to do', [
+        'no local rows needed re-keying',
+        'the pass only touches local-only data (downloads, listening history, bookmarks);',
+        'the library itself is server-owned and refilled by a sync, never re-keyed here',
+      ], verdict);
       return;
     }
 
@@ -358,7 +366,7 @@ async function execute(): Promise<void> {
       `superseded rows  : ${superseded}`,
       `files moved      : ${files.moved} (missing ${files.missing}, failed ${files.failed})`,
       `tables discarded : ${cleared}`,
-    ]);
+    ], verdict);
     // Buffered behind a 2s timer and nothing wires a flush to AppState, so without this
     // the lines explaining a run are exactly the ones an app kill loses.
     await flushLibrarySyncLog();
@@ -367,7 +375,7 @@ async function execute(): Promise<void> {
     // The marker stays `pending`, so the next launch re-enters the interstitial and
     // repeats from the top. Every step is idempotent, so that is safe.
     logLibrarySync(`[reid] failed: ${e instanceof Error ? e.message : String(e)}`);
-    appendReidLog('FAILED', [`error: ${e instanceof Error ? e.message : String(e)}`]);
+    appendReidLog('FAILED', [`error: ${e instanceof Error ? e.message : String(e)}`], verdict);
     await flushLibrarySyncLog();
     gate.fail();
   }

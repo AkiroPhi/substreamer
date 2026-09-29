@@ -18,14 +18,14 @@ import { currentServerInfo, hasServerAnswered, probedServerVersion, reidVerdict 
 const LOG_FILE_NAME = 'migration-log.txt';
 
 /** One line per fact, so a shared log is greppable and diffable between runs. */
-function stateLines(): string[] {
+function stateLines(verdict: string): string[] {
   const { serverType, serverVersion } = currentServerInfo();
   return [
     `  server type      : ${serverType ?? '(unknown)'}`,
     `  version (stored) : ${serverVersion ?? '(none)'}`,
     `  version (probed) : ${probedServerVersion() ?? '(no answer this launch)'}`,
     `  server answered  : ${hasServerAnswered() ? 'yes' : 'no'}`,
-    `  verdict          : ${reidVerdict()}`,
+    `  verdict          : ${verdict}`,
   ];
 }
 
@@ -36,13 +36,23 @@ function stateLines(): string[] {
  * failure is swallowed — this is the one place where that is the right call, because
  * nothing reads the file back.
  */
-export function appendReidLog(headline: string, detail: readonly string[] = []): void {
+export function appendReidLog(
+  headline: string,
+  detail: readonly string[] = [],
+  /**
+   * The verdict that CAUSED this outcome. Must be passed by anything logging after the
+   * pass finished: `reidVerdict()` reads the marker, and a completed marker makes it
+   * return `skip` — so a successful run used to record "verdict: skip", which reads as
+   * though the pass had declined to do anything.
+   */
+  verdict: string = reidVerdict(),
+): void {
   try {
     const lines = [
       '',
       `--- Navidrome re-key: ${headline} ---`,
       `  at               : ${new Date().toISOString()}`,
-      ...stateLines(),
+      ...stateLines(verdict),
       ...detail.map((d) => `  ${d}`),
       '',
     ];

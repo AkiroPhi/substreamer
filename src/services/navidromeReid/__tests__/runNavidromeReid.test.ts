@@ -75,12 +75,22 @@ jest.mock('../reidProbe', () => ({ cannotAskNow: () => mockCannotAsk }));
 let mockServerAnswered = true;
 
 let mockVerdict = 'run';
-const mockSetReidState = jest.fn((s: string) => mockCalls.push(`setReidState:${s}`));
+const mockSetReidState = jest.fn((s: string) => {
+  mockCalls.push(`setReidState:${s}`);
+  // The real marker drives the verdict: once complete, reidVerdict() answers 'skip'.
+  // Modelled here so a log written after the pass cannot quietly report the wrong cause.
+  if (s === 'complete') mockVerdict = 'skip';
+});
 jest.mock('../reidMarker', () => ({
   hasServerAnswered: () => mockServerAnswered,
   reidVerdict: () => mockVerdict,
   setReidState: (s: string) => mockSetReidState(s),
   setUserConfirmedReid: jest.fn(),
+}));
+
+const mockAppendReidLog = jest.fn();
+jest.mock('../reidMigrationLog', () => ({
+  appendReidLog: (...args: unknown[]) => mockAppendReidLog(...args),
 }));
 
 jest.mock('../../../store/persistence/rehydrate', () => ({
@@ -148,6 +158,7 @@ beforeEach(() => {
   mockLog.mockClear();
   resetMidSessionAcceptanceForTests();
   mockSetReidState.mockClear();
+  mockAppendReidLog.mockClear();
   mockStorage.clear();
   mockStorageDropWrites = false;
   migrationGateStore.getState().reset();
@@ -486,5 +497,30 @@ describe('reporting that the pass was deferred', () => {
 
     expect(mockCalls).toEqual([]);
     expect(migrationGateStore.getState().deferred).toBe(false);
+  });
+});
+
+// The shared migration log is what a user sends when something looks wrong, so a line
+// that misreports why the pass ran costs a real investigation — it cost one here.
+describe('what the pass records about itself', () => {
+  it('logs the verdict that CAUSED the run, not the one the finished marker implies', async () => {
+    await runNavidromeReidIfNeeded();
+
+    const entry = mockAppendReidLog.mock.calls.find((c) => c[0] === 'complete');
+    expect(entry).toBeDefined();
+    expect(entry?.[2]).toBe('run');
+  });
+
+  it('says what it examined when there was nothing to re-key', async () => {
+    mockPairs = 0;
+
+    await runNavidromeReidIfNeeded();
+
+    const entry = mockAppendReidLog.mock.calls.find((c) => c[0] === 'nothing to do');
+    expect(entry).toBeDefined();
+    // Not "every id was already canonical" — that reads as a claim about the library,
+    // which this pass never touches.
+    expect((entry?.[1] as string[]).join(' ')).toContain('local-only');
+    expect(entry?.[2]).toBe('run');
   });
 });
