@@ -7,14 +7,15 @@
  *
  * Visual language matches `ImageCacheBanner` / `LibrarySyncBanner` — dark
  * capsule centred below the header, rendered via the priority ladder in
- * `BannerStack`. Simpler than the image-cache banner: no error/paused/dismiss
- * states, just running progress.
+ * `BannerStack`. Simpler than the image-cache banner: no error/dismiss states. It does
+ * carry the shared "paused until the server is reachable" state with a retry, so it never
+ * reports a count that cannot move.
  */
 
 import Ionicons from '@react-native-vector-icons/ionicons/static';
 import { memo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -24,6 +25,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { useServerReachable } from '../hooks/useServerReachable';
+import { recheckNow } from '../services/connectivityService';
 import { downloadedMetadataRefreshStore } from '../store/downloadedMetadataRefreshStore';
 
 const CAPSULE_HEIGHT = 44;
@@ -69,6 +72,11 @@ export const DownloadedMetadataBanner = memo(function DownloadedMetadataBanner()
     prevVisible.current = visible;
   }, [visible, heightValue, capsuleScale, capsuleOpacity]);
 
+  // Read with the other hooks, above the `visible` early return.
+  const { canReach, offlineMode } = useServerReachable();
+  const stalled = !canReach;
+  const canRetry = stalled && !offlineMode;
+
   const containerStyle = useAnimatedStyle(() => ({
     height: heightValue.value,
   }));
@@ -80,18 +88,37 @@ export const DownloadedMetadataBanner = memo(function DownloadedMetadataBanner()
 
   if (!visible) return null;
 
-  const label = t('downloadedMetadataBannerLabel', 'Updating downloads');
-  const countText = `${done} / ${total}`;
+  const label = stalled
+    ? (offlineMode
+      ? t('downloadedMetadataBannerPausedOffline', 'Downloads paused — offline')
+      : t('downloadedMetadataBannerPausedNoConnection', 'Downloads paused — no connection'))
+    : t('downloadedMetadataBannerLabel', 'Updating downloads');
+  // See ImageCacheBanner: a count next to "paused" reads as progress that is not happening.
+  const countText = stalled ? '' : ` ${done} / ${total}`;
 
   return (
     <Animated.View style={[styles.outer, containerStyle]}>
       <View style={styles.pillContainer}>
-        <Animated.View style={[styles.capsule, capsuleStyle]}>
-          <Ionicons name="sync" size={16} color={ACCENT_BLUE} />
-          <Text style={styles.label} numberOfLines={1}>
-            {`${label} ${countText}`}
-          </Text>
-        </Animated.View>
+        <Pressable
+          testID="downloaded-metadata-banner-action"
+          onPress={() => {
+            // `_layout`'s connectivity subscriber re-runs the pass once the ping lands.
+            if (canRetry) void recheckNow();
+          }}
+          disabled={!canRetry}
+        >
+          <Animated.View style={[styles.capsule, capsuleStyle]}>
+            <Ionicons
+              name={stalled ? 'cloud-offline-outline' : 'sync'}
+              size={16}
+              color={ACCENT_BLUE}
+            />
+            <Text style={styles.label} numberOfLines={1}>
+              {`${label}${countText}`}
+            </Text>
+            {canRetry && <Ionicons name="refresh" size={15} color={ACCENT_BLUE} />}
+          </Animated.View>
+        </Pressable>
       </View>
     </Animated.View>
   );
@@ -107,6 +134,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capsule: {
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -121,6 +149,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   label: {
+    flexShrink: 1,
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',

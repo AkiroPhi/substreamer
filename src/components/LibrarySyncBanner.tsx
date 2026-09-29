@@ -18,6 +18,8 @@ import {
   type LibrarySyncPhase,
 } from '../store/syncStatusStore';
 
+import { useServerReachable } from '../hooks/useServerReachable';
+import { recheckNow } from '../services/connectivityService';
 import type { IoniconsName } from '../utils/iconNames';
 const CAPSULE_HEIGHT = 44;
 const CAPSULE_BORDER_RADIUS = CAPSULE_HEIGHT / 2;
@@ -42,6 +44,8 @@ interface Variant {
   iconColor: string;
   label: string;
   tappable: boolean;
+  /** What a tap does. Defaults to opening settings. */
+  action?: 'settings' | 'retry';
 }
 
 function getVariant(
@@ -70,7 +74,8 @@ function getVariant(
       icon: 'cloud-offline',
       iconColor: WARNING_AMBER,
       label: t('syncPausedOffline'),
-      tappable: false,
+      tappable: true,
+      action: 'retry',
     };
   }
   if (
@@ -136,7 +141,8 @@ function getListVariant(
       icon: 'cloud-offline',
       iconColor: WARNING_AMBER,
       label: t('syncPausedOffline'),
-      tappable: false,
+      tappable: true,
+      action: 'retry',
     };
   }
   if (phase === 'paused-error') {
@@ -208,11 +214,23 @@ export const LibrarySyncBanner = memo(function LibrarySyncBanner() {
     ],
   }));
 
+  // A retry is meaningless in offline mode — the offline toggle is the fix — so the
+  // affordance is withheld there rather than offered and ignored.
+  const { offlineMode } = useServerReachable();
+  const isRetry = variant?.action === 'retry';
+  const tappable = (variant?.tappable ?? false) && !(isRetry && offlineMode);
+
   const handlePress = useCallback(() => {
-    if (variant?.tappable) {
-      router.push('/settings-library-data');
+    if (!tappable) return;
+    if (isRetry) {
+      // Just re-ask. A ping that succeeds flips the connectivity store, and the
+      // subscriber in `_layout` already resumes the sync, the image queue and the
+      // metadata pass — calling them here would be a second, divergent resume path.
+      void recheckNow();
+      return;
     }
-  }, [router, variant]);
+    router.push('/settings-library-data');
+  }, [router, tappable, isRetry]);
 
   const handleDismiss = useCallback(() => {
     syncStatusStore.getState().setBannerDismissedAt(Date.now());
@@ -224,7 +242,7 @@ export const LibrarySyncBanner = memo(function LibrarySyncBanner() {
   return (
     <Animated.View style={[styles.outer, containerStyle]}>
       <View style={styles.pillContainer}>
-        <Pressable onPress={handlePress} disabled={!renderVariant.tappable}>
+        <Pressable onPress={handlePress} disabled={!tappable}>
           <Animated.View style={[styles.capsule, capsuleStyle]}>
             <Ionicons name={renderVariant.icon} size={16} color={renderVariant.iconColor} />
             <Text style={styles.label} numberOfLines={1}>
@@ -255,6 +273,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capsule: {
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -270,6 +289,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   label: {
+    flexShrink: 1,
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',

@@ -20,6 +20,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { useServerReachable } from '../hooks/useServerReachable';
+import { recheckNow } from '../services/connectivityService';
 import { dismissImageCacheErrorBanner } from '../services/imageCacheService';
 import { imageDownloadQueueStore } from '../store/imageDownloadQueueStore';
 
@@ -45,6 +47,13 @@ export const ImageCacheBanner = memo(function ImageCacheBanner() {
   const cycleFailed = imageDownloadQueueStore((s) => s.cycleFailed);
   const isPaused = imageDownloadQueueStore((s) => s.isPaused);
   const phase = imageDownloadQueueStore((s) => s.phase);
+
+  // The queue silently declines to run without a reachable server, so without this the
+  // pill reports a count that cannot move.
+  const { canReach, offlineMode } = useServerReachable();
+  const stalled = !isPaused && !canReach;
+  // Offline mode is a choice, so retrying is not the answer there — the offline toggle is.
+  const canRetry = stalled && !offlineMode;
 
   const isError = phase === 'error';
   // 'dismissed' keeps the cycle alive (so retry still works) but hides the banner.
@@ -88,8 +97,14 @@ export const ImageCacheBanner = memo(function ImageCacheBanner() {
 
   const progressLabel = isPaused
     ? t('imageCacheBannerPausedLabel', 'Paused')
-    : t('imageCacheBannerRunningLabel', 'Refreshing covers');
-  const countText = `${cycleProcessed} / ${cycleTotal}`;
+    : stalled
+      ? (offlineMode
+        ? t('imageCacheBannerPausedOffline', 'Covers paused — offline')
+        : t('imageCacheBannerPausedNoConnection', 'Covers paused — no connection'))
+      : t('imageCacheBannerRunningLabel', 'Refreshing covers');
+  // No count while stalled: "0 / 11" alongside "paused" reads as progress that is not
+  // happening, and the number cannot move until the connection is back.
+  const countText = stalled ? '' : ` ${cycleProcessed} / ${cycleTotal}`;
   const errorLabel = t('imageCacheBannerErrorLabel', {
     count: cycleFailed,
     defaultValue: "{{count}} covers couldn't be refreshed",
@@ -99,18 +114,36 @@ export const ImageCacheBanner = memo(function ImageCacheBanner() {
     <Animated.View style={[styles.outer, containerStyle]}>
       <View style={styles.pillContainer}>
         {/* In the error phase the whole pill is a tap-to-dismiss control. */}
-        <Pressable onPress={() => dismissImageCacheErrorBanner()} disabled={!isError}>
+        <Pressable
+          testID="image-cache-banner-action"
+          onPress={() => {
+            if (isError) { dismissImageCacheErrorBanner(); return; }
+            // `_layout`'s connectivity subscriber drains the queue once the ping lands.
+            if (canRetry) { void recheckNow(); }
+          }}
+          disabled={!isError && !canRetry}
+        >
           <Animated.View style={[styles.capsule, capsuleStyle]}>
             <Ionicons
-              name={isError ? 'alert-circle' : isPaused ? 'pause' : 'sync'}
+              name={
+                isError
+                  ? 'alert-circle'
+                  : isPaused
+                    ? 'pause'
+                    : stalled
+                      ? 'cloud-offline-outline'
+                      : 'sync'
+              }
               size={16}
               color={isError ? ERROR_RED : ACCENT_BLUE}
             />
             <Text style={styles.label} numberOfLines={1}>
-              {isError ? errorLabel : `${progressLabel} ${countText}`}
+              {isError ? errorLabel : `${progressLabel}${countText}`}
             </Text>
             {isError ? (
               <Ionicons name="close" size={15} color="rgba(255, 255, 255, 0.55)" />
+            ) : canRetry ? (
+              <Ionicons name="refresh" size={15} color={ACCENT_BLUE} />
             ) : null}
           </Animated.View>
         </Pressable>
@@ -129,6 +162,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capsule: {
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -143,6 +177,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   label: {
+    flexShrink: 1,
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',

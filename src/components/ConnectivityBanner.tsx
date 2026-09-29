@@ -12,7 +12,7 @@ import Animated, {
 
 import { useTranslation } from 'react-i18next';
 
-import { handleSslCertPrompt } from '../services/connectivityService';
+import { handleSslCertPrompt, recheckNow } from '../services/connectivityService';
 import { switchToServer } from '../services/failoverService';
 import { connectivityStore, type BannerState, type FailoverPrompt } from '../store/connectivityStore';
 import { offlineModeStore } from '../store/offlineModeStore';
@@ -39,6 +39,8 @@ interface ContentConfig {
   icon: IoniconsName;
   messageKey: string;
   tappable: boolean;
+  /** Dead-end state whose only useful action is asking the server again now. */
+  retry?: boolean;
 }
 
 function getConfig(
@@ -54,7 +56,7 @@ function getConfig(
   }
   if (!hasConnection) {
     // No network at all — a server switch is pointless, so don't offer one.
-    return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'noInternetConnection', tappable: false };
+    return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'noInternetConnection', tappable: true, retry: true };
   }
   // Active server unreachable (network is up). Drive the message off the
   // failover prompt set by failoverService.evaluateServerDownPrompt.
@@ -65,9 +67,9 @@ function getConfig(
     return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'failoverOfferPrimary', tappable: true };
   }
   if (failoverPrompt === 'both-down') {
-    return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'serversBothUnavailable', tappable: false };
+    return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'serversBothUnavailable', tappable: true, retry: true };
   }
-  return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'serverUnreachable', tappable: false };
+  return { iconColor: ERROR_RED, icon: 'cloud-offline', messageKey: 'serverUnreachable', tappable: true, retry: true };
 }
 
 export const ConnectivityBanner = memo(function ConnectivityBanner() {
@@ -105,8 +107,11 @@ export const ConnectivityBanner = memo(function ConnectivityBanner() {
     ) {
       void switchToServer(failoverPrompt);
       connectivityStore.getState().clearFailoverPrompt();
+      return;
     }
-  }, [bannerState, failoverPrompt]);
+    // Dead-end states: the only useful action is to ask again now.
+    if (config.retry === true) void recheckNow();
+  }, [bannerState, failoverPrompt, config.retry]);
 
   useEffect(() => {
     const wasVisible = prev.current !== 'hidden';
@@ -165,10 +170,15 @@ export const ConnectivityBanner = memo(function ConnectivityBanner() {
               <Animated.Text style={styles.label} numberOfLines={1}>
                 {t(config.messageKey)}
               </Animated.Text>
-              {/* The SSL-error banner is tappable (opens the cert prompt to
-                  re-trust in place). Show a chevron so that's discoverable. */}
+              {/* Make the action discoverable, and say which one it is: a refresh for
+                  the dead-end states that only re-ask, a chevron for the ones that
+                  navigate or switch server. */}
               {tappable ? (
-                <Ionicons name="chevron-forward" size={15} color="rgba(255, 255, 255, 0.55)" />
+                <Ionicons
+                  name={config.retry === true ? 'refresh' : 'chevron-forward'}
+                  size={15}
+                  color="rgba(255, 255, 255, 0.55)"
+                />
               ) : null}
             </Animated.View>
           </Animated.View>
@@ -188,6 +198,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capsule: {
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -202,11 +213,13 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   contentRow: {
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   label: {
+    flexShrink: 1,
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',

@@ -38,6 +38,7 @@ import {
 import { authStore } from '../store/authStore';
 import { connectivityStore } from '../store/connectivityStore';
 import { offlineModeStore } from '../store/offlineModeStore';
+import { serverWorkAllowed } from '../utils/serverWorkAllowed';
 import { fireAndForget } from '../utils/fireAndForget';
 import { runWhenIdle } from '../utils/runWhenIdle';
 import {
@@ -2264,10 +2265,12 @@ function flushAggregateRecalc(): void {
 }
 
 function connectivityAllowsImageWork(): boolean {
-  if (offlineModeStore.getState().offlineMode) return false;
   const conn = connectivityStore.getState();
-  if (!conn.isServerReachable || !conn.hasConnection) return false;
-  return true;
+  return serverWorkAllowed(
+    offlineModeStore.getState().offlineMode,
+    conn.hasConnection,
+    conn.isServerReachable,
+  );
 }
 
 /**

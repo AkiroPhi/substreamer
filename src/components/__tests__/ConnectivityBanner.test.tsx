@@ -3,11 +3,13 @@ jest.mock('../../store/persistence/kvStorage', () => require('../../store/persis
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 
+import { recheckNow } from '../../services/connectivityService';
 import { switchToServer } from '../../services/failoverService';
 import { connectivityStore } from '../../store/connectivityStore';
 import { offlineModeStore } from '../../store/offlineModeStore';
 
 const mockSwitchToServer = switchToServer as jest.Mock;
+const mockRecheckNow = recheckNow as jest.Mock;
 
 jest.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -22,6 +24,7 @@ jest.mock('../../hooks/useTheme', () => ({
 
 jest.mock('../../services/connectivityService', () => ({
   handleSslCertPrompt: jest.fn(),
+  recheckNow: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('../../services/failoverService', () => ({
@@ -62,6 +65,7 @@ beforeEach(() => {
   });
   offlineModeStore.setState({ offlineMode: false });
   mockSwitchToServer.mockClear();
+  mockRecheckNow.mockClear();
 });
 
 describe('ConnectivityBanner', () => {
@@ -132,7 +136,9 @@ describe('ConnectivityBanner', () => {
     expect(connectivityStore.getState().failoverPrompt).toBeNull();
   });
 
-  it('shows "Both servers unavailable" and is NOT tappable when failoverPrompt=both-down', () => {
+  // Both servers down: there is nothing to switch TO, so the tap re-asks instead of
+  // offering a failover. It must not silently do nothing — that was the dead end.
+  it('offers a retry, not a server switch, when failoverPrompt=both-down', () => {
     connectivityStore.setState({
       bannerState: 'unreachable',
       hasConnection: true,
@@ -141,6 +147,29 @@ describe('ConnectivityBanner', () => {
     const { getByText } = render(<ConnectivityBanner />);
     fireEvent.press(getByText('Both servers unavailable'));
     expect(mockSwitchToServer).not.toHaveBeenCalled();
+    expect(mockRecheckNow).toHaveBeenCalled();
+  });
+
+  it('re-pings the server when the plain unreachable banner is tapped', () => {
+    connectivityStore.setState({
+      bannerState: 'unreachable',
+      hasConnection: true,
+      failoverPrompt: null,
+    });
+    const { getByText } = render(<ConnectivityBanner />);
+    fireEvent.press(getByText('Server unreachable'));
+    expect(mockRecheckNow).toHaveBeenCalled();
+  });
+
+  it('re-pings when there is no network at all', () => {
+    connectivityStore.setState({
+      bannerState: 'unreachable',
+      hasConnection: false,
+      failoverPrompt: null,
+    });
+    const { getByText } = render(<ConnectivityBanner />);
+    fireEvent.press(getByText('No internet connection'));
+    expect(mockRecheckNow).toHaveBeenCalled();
   });
 
   it('has collapsed height when offline mode suppresses banner', () => {

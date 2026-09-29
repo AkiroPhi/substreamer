@@ -282,6 +282,18 @@ function handleNetInfoChange(state: NetInfoState): void {
   }
 }
 
+/**
+ * Re-ping the server now, on the user's explicit request — the retry affordance on the
+ * banners. Deliberately does NOT reset `consecutiveFailures`: a successful ping clears it
+ * anyway, and zeroing it on a failed retry would weaken the debounce that stops a single
+ * blip flipping the UI.
+ */
+export async function recheckNow(): Promise<void> {
+  if (pingInFlight) return;
+  clearPingTimer();
+  await pingServer();
+}
+
 export function startMonitoring(): void {
   if (unsubscribeNetInfo) return;
 

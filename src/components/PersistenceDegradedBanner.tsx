@@ -86,6 +86,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capsule: {
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -100,6 +101,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   label: {
+    flexShrink: 1,
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
