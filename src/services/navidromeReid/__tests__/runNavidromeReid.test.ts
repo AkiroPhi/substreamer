@@ -92,9 +92,23 @@ jest.mock('../../musicCacheService', () => ({
 jest.mock('../../../store/ratingStore', () => ({
   ratingStore: { persist: { rehydrate: () => Promise.resolve() } },
 }));
-jest.mock('../../../store/syncStatusStore', () => ({
-  syncStatusStore: { persist: { rehydrate: () => Promise.resolve() } },
-}));
+// A real (tiny) store, not a stub: the pass subscribes to this to mirror the library
+// upgrade's progress into the gate, so getState/setState/subscribe all have to work.
+jest.mock('../../../store/syncStatusStore', () => {
+  let state: Record<string, number> = { normalizedMigrationTotal: 0, normalizedMigrationDone: 0 };
+  const listeners = new Set<() => void>();
+  return {
+    syncStatusStore: {
+      persist: { rehydrate: () => Promise.resolve() },
+      getState: () => state,
+      setState: (partial: Record<string, number>) => {
+        state = { ...state, ...partial };
+        listeners.forEach((l) => l());
+      },
+      subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+    },
+  };
+});
 jest.mock('../../../store/persistence', () => ({
   kvStorage: { setItem: () => Promise.resolve(), getItem: () => Promise.resolve(null) },
 }));
@@ -114,6 +128,7 @@ jest.mock('../../dataModelUpgradeService', () => ({
 }));
 
 import { migrationGateStore } from '../../../store/migrationGateStore';
+import { syncStatusStore } from '../../../store/syncStatusStore';
 import {
   acceptMidSessionReid,
   declineMidSessionReid,
@@ -136,6 +151,7 @@ beforeEach(() => {
   mockStorage.clear();
   mockStorageDropWrites = false;
   migrationGateStore.getState().reset();
+  syncStatusStore.setState({ normalizedMigrationTotal: 0, normalizedMigrationDone: 0 });
 });
 
 const idx = (name: string): number => mockCalls.indexOf(name);
@@ -340,6 +356,38 @@ describe('the blob ETL race', () => {
     expect(mockCalls).toContain('awaitEtl');
     expect(mockCalls.indexOf('awaitEtl')).toBeLessThan(mockCalls.indexOf('discardLibrary'));
     expect(mockCalls).toContain('setReidState:complete');
+  });
+
+  // Holding silently on "Preparing" for minutes reads as a hang. The wait gets its own
+  // stage, carrying the library upgrade's own counter so the screen matches the banner.
+  it('shows a waiting stage that mirrors the library upgrade progress', async () => {
+    syncStatusStore.setState({ normalizedMigrationTotal: 900, normalizedMigrationDone: 0 });
+    let release = (): void => {};
+    mockEtlInFlight = new Promise<void>((r) => { release = r; });
+    const run = runNavidromeReidIfNeeded();
+    await Promise.resolve();
+
+    expect(migrationGateStore.getState().activeStage).toBe('waitingForTasks');
+
+    // The upgrade advances; the gate must follow it rather than sit still.
+    syncStatusStore.setState({ normalizedMigrationDone: 450 });
+    expect(migrationGateStore.getState().stages.waitingForTasks)
+      .toEqual(expect.objectContaining({ total: 900, done: 450 }));
+
+    release();
+    await run;
+
+    // And it must hand over to the real work. Asserting only that the active stage moved
+    // on is vacuous — later stages would satisfy it even if 'preparing' never ran.
+    expect(migrationGateStore.getState().stages.preparing).toBeDefined();
+  });
+
+  // Nothing to wait for: the stage must not appear at all, or every run claims to be
+  // blocked on a job that was never running.
+  it('shows no waiting stage when no ETL is running', async () => {
+    await runNavidromeReidIfNeeded();
+
+    expect(migrationGateStore.getState().stages.waitingForTasks).toBeUndefined();
   });
 
   it('proceeds straight through when no ETL is running', async () => {

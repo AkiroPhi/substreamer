@@ -1132,6 +1132,7 @@
   "migrationPausedTitle": "Update paused",
   "migrationPausedBody": "Reopen Substreamer to finish updating your library.",
   "migrationCompleteNote": "Your library still needs to be resynced, and the artwork for your downloaded music re-fetched. Both happen automatically in the background whenever you are online, so there is nothing to do.",
+  "migrationStageWaiting": "Waiting for the library upgrade",
   "migrationOfferTitle": "Update your library now?",
   "migrationOfferBody": "Your server has changed how it identifies tracks, so Substreamer needs to update its copy. This takes a few minutes and cannot be paused once it starts. Your downloaded music keeps playing throughout.",
   "migrationOfferConfirm": "Update now",

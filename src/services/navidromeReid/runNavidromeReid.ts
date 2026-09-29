@@ -183,7 +183,6 @@ async function execute(): Promise<void> {
     return;
   }
 
-  gate.beginStage('preparing');
   setReidState('pending');
 
   // An ETL that started before the gate went up is still running, and its writes carry
@@ -193,9 +192,30 @@ async function execute(): Promise<void> {
   // visible; this closes the other direction.
   const etl = dataModelUpgradeInFlight();
   if (etl) {
+    // Given its own stage, mirroring the upgrade's own counter. On a large library this
+    // wait is minutes long, and a spinner on "Preparing" with nothing moving reads as a
+    // hang — the user has no way to tell it is deliberately holding for another job.
+    const mirror = () => {
+      const sync = syncStatusStore.getState();
+      const live = migrationGateStore.getState();
+      if (live.stages.waitingForTasks?.total !== sync.normalizedMigrationTotal) {
+        live.beginStage('waitingForTasks', sync.normalizedMigrationTotal);
+      }
+      live.advanceStage('waitingForTasks', sync.normalizedMigrationDone);
+    };
+    // `mirror` opens the stage itself on its first call (the stored total starts
+    // undefined and never matches), so there is no separate beginStage here.
+    mirror();
+    const unsubscribe = syncStatusStore.subscribe(mirror);
     logLibrarySync('[reid] waiting for the blob ETL to finish before touching the library');
-    await etl;
+    try {
+      await etl;
+    } finally {
+      unsubscribe();
+    }
   }
+
+  gate.beginStage('preparing');
 
   try {
     // Prove the deferral works on THIS build before writing anything. The spike that

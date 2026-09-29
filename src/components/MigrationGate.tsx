@@ -22,6 +22,7 @@ import { migrationGateStore, type MigrationStageId } from '../store/migrationGat
 
 /** Stage order, and the i18n key for each label. */
 const STAGE_LABELS: ReadonlyArray<{ id: MigrationStageId; key: string }> = [
+  { id: 'waitingForTasks', key: 'migrationStageWaiting' },
   { id: 'preparing', key: 'migrationStagePreparing' },
   { id: 'updatingDownloads', key: 'migrationStageUpdatingDownloads' },
   { id: 'movingFiles', key: 'migrationStageMovingFiles' },

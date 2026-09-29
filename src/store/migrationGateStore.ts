@@ -15,6 +15,8 @@ import { create } from 'zustand';
 
 /** A named unit of work the screen reports on, in the order it runs. */
 export type MigrationStageId =
+  /** Held because another one-shot job is mid-flight; mirrors that job's progress. */
+  | 'waitingForTasks'
   | 'preparing'
   | 'updatingDownloads'
   | 'movingFiles'
