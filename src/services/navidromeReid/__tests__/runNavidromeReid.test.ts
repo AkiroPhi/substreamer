@@ -38,9 +38,18 @@ jest.mock('../../../store/persistence/imageDownloadQueueTable', () => ({
   clearImageQueue: () => { mockCalls.push('clearImageQueue'); return Promise.resolve(0); },
 }));
 
+let mockRewarmCycle: string | null = 'cyc-1';
 jest.mock('../../imageCacheService', () => ({
   cancelImageRefreshCycle: () => { mockCalls.push('cancelImageRefreshCycle'); return Promise.resolve(); },
   clearImageCache: () => { mockCalls.push('clearImageCache'); return Promise.resolve(); },
+  enqueueImageRefreshCycle: (scope: string) => {
+    mockCalls.push(`enqueueImageRefreshCycle:${scope}`);
+    return Promise.resolve(mockRewarmCycle);
+  },
+  processImageQueue: () => { mockCalls.push('processImageQueue'); return Promise.resolve(); },
+  // imageDownloadQueueStore subscribes to this at module init.
+  subscribeImageQueueChanges: () => () => {},
+  readImageQueueMeta: () => ({ cycleId: null, cycleTotal: 0, isPaused: false, phase: 'idle' }),
 }));
 
 let mockPairs = 3;
@@ -167,6 +176,7 @@ beforeEach(() => {
   mockAppendReidLog.mockClear();
   mockStorage.clear();
   mockStorageDropWrites = false;
+  mockRewarmCycle = 'cyc-1';
   migrationGateStore.getState().reset();
   syncStatusStore.setState({ normalizedMigrationTotal: 0, normalizedMigrationDone: 0 });
 });
@@ -604,5 +614,33 @@ describe('the completion log counts every rewrite, not just the map', () => {
     expect(detail).toContain('kv ids moved     : 3');
     // And it must not claim nothing happened.
     expect(detail).not.toMatch(/^ids re-keyed\s+: 0$/m);
+  });
+});
+
+// A download is not restored until its artwork is back: the files moved and the rows were
+// re-keyed, but the pass clears the image cache, and covers otherwise only return when a
+// surface happens to render one. On a device that left every downloaded playlist blank.
+describe('restoring downloaded artwork', () => {
+  it('re-warms the downloaded covers as the final step of the pass', async () => {
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toContain('enqueueImageRefreshCycle:refresh-downloads');
+    // After the cache is cleared, never before — otherwise the warm is thrown away.
+    expect(mockCalls.indexOf('clearImageCache'))
+      .toBeLessThan(mockCalls.indexOf('enqueueImageRefreshCycle:refresh-downloads'));
+    // And the pass waits for it rather than leaving it to drain unseen.
+    expect(mockCalls.indexOf('enqueueImageRefreshCycle:refresh-downloads'))
+      .toBeLessThan(mockCalls.indexOf('processImageQueue'));
+    expect(mockCalls).toContain('setReidState:complete');
+  });
+
+  it('does not wait on a drain when there was nothing to re-warm', async () => {
+    mockRewarmCycle = null;
+
+    await runNavidromeReidIfNeeded();
+
+    expect(mockCalls).toContain('enqueueImageRefreshCycle:refresh-downloads');
+    expect(mockCalls).not.toContain('processImageQueue');
+    expect(mockCalls).toContain('setReidState:complete');
   });
 });

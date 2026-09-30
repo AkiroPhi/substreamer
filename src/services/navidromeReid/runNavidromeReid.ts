@@ -21,7 +21,13 @@
  * from the top. Every step is idempotent, so repeating is free.
  */
 
-import { cancelImageRefreshCycle, clearImageCache } from '../imageCacheService';
+import {
+  cancelImageRefreshCycle,
+  clearImageCache,
+  enqueueImageRefreshCycle,
+  processImageQueue,
+} from '../imageCacheService';
+import { imageDownloadQueueStore } from '../../store/imageDownloadQueueStore';
 import { flushLibrarySyncLog, logLibrarySync } from '../librarySyncLogger';
 import { migrationGateStore } from '../../store/migrationGateStore';
 import { rebuildTrackMaps } from '../musicCacheService';
@@ -465,15 +471,34 @@ async function refreshArtwork(): Promise<void> {
   await cancelImageRefreshCycle();
   await clearImageCache({ reinit: false });
 
-  // Deliberately NO re-warm cycle here. It used to enqueue one, and it could only ever
-  // enqueue the WRONG keys: this runs after `discardLibrary`, so `albums` is empty and
-  // there is no current cover-art token to snapshot. The snapshot fell back to the frozen
-  // `cached_items.cover_art_id` — bare entity ids, not the `al-<id>_<hash>` tokens the UI
-  // renders and the server serves — so every fetch failed, three failures in a row tripped
-  // the "purging cache rows" valve, and the covers stayed blank anyway.
+  // The pass's final task: put the downloaded covers back before letting go of the
+  // screen. Everything else about a download survives — the files moved, the rows were
+  // re-keyed — but the cache was just cleared, and cover art otherwise only returns when
+  // some surface happens to render it. Measured on a real device: no downloaded playlist
+  // cover came back at all, and the only albums that did were the ones the user had
+  // scrolled past. Downloads are the one thing that must work offline, so restoring them
+  // is part of the pass, not something left to chance later.
   //
-  // Cover art repopulates on demand instead: `CachedImage` calls `cacheAllSizes` for any
-  // key it cannot find locally, and the sync that follows this pass refills `albums` with
-  // the real tokens moments later. The user is necessarily online — the pass only runs
-  // against a live 0.64 server — so there is nothing to pre-warm for.
+  // Safe here specifically: `cached_songs`, `cached_albums` and `cached_playlists` are
+  // KEPT_TABLES, so they survive `discardLibrary` above and carry the re-keyed tokens.
+  const cycleId = await enqueueImageRefreshCycle('refresh-downloads');
+  if (cycleId === null) return;
+
+  const gate = migrationGateStore.getState();
+  const mirror = (): void => {
+    const q = imageDownloadQueueStore.getState();
+    const live = migrationGateStore.getState();
+    if (live.stages.refreshingArtwork?.total !== q.cycleTotal) {
+      live.beginStage('refreshingArtwork', q.cycleTotal);
+    }
+    live.advanceStage('refreshingArtwork', q.cycleProcessed);
+  };
+  mirror();
+  const unsubscribe = imageDownloadQueueStore.subscribe(mirror);
+  try {
+    await processImageQueue();
+  } finally {
+    unsubscribe();
+  }
+  gate.advanceStage('refreshingArtwork', imageDownloadQueueStore.getState().cycleProcessed);
 }

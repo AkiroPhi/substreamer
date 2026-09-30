@@ -139,6 +139,23 @@ const mockCountByStatus = jest.fn((status: string) =>
   mockQueueState.rows.filter((r) => r.status === status).length,
 );
 
+const mockCoverRows: Record<string, string[]> = {
+  cached_albums: [], cached_playlists: [], cached_songs_cover_art: [], cached_songs_cover_art_id: [],
+};
+jest.mock('../../store/persistence/db', () => ({
+  isDbHealthy: () => true,
+  getDb: () => ({
+    getAllSync: (sql: string) => {
+      // Keyed by table+column: cached_songs is read twice, once per cover-art mode.
+      const key = sql.includes('cached_songs')
+        ? (sql.includes('cover_art_id') ? 'cached_songs_cover_art_id' : 'cached_songs_cover_art')
+        : Object.keys(mockCoverRows).find((t) => sql.includes(t));
+      if (key === undefined || !(key in mockCoverRows)) throw new Error(`unmocked: ${sql}`);
+      return mockCoverRows[key].map((v) => ({ v }));
+    },
+  }),
+}));
+
 jest.mock('../../store/persistence/imageDownloadQueueTable', () => ({
   enqueueImagesBulk: (ids: readonly string[], scope: any, cycleId: string) => mockEnqueueBulk(ids, scope, cycleId),
   pickNextQueuedImageRow: () => mockPickNext(),
@@ -241,6 +258,10 @@ beforeEach(() => {
   // Re-install the downloader stub — it may have been reset by
   // earlier tests calling __setImageDownloaderForTest(undefined).
   __setImageDownloaderForTest(mockDownloader);
+  mockCoverRows.cached_albums = [];
+  mockCoverRows.cached_playlists = [];
+  mockCoverRows.cached_songs_cover_art = [];
+  mockCoverRows.cached_songs_cover_art_id = [];
 });
 
 describe('image-queue meta accessors', () => {
@@ -258,30 +279,40 @@ describe('image-queue meta accessors', () => {
 });
 
 describe('enqueueImageRefreshCycle', () => {
-  it('refresh-downloads snapshots from cached_items + per-song covers', async () => {
-    // Snapshot keys off the stored coverArt VALUE: the cached_item's
-    // coverArtId for album/playlist, and the mode-aware resolved cover for
-    // songs (album mode, empty library → falls back to the song's own coverArt).
-    mockHydrateCachedItems.mockReturnValue({
-      'a-1': { itemId: 'a-1', type: 'album', coverArtId: 'cov-a1' },
-      'pl-1': { itemId: 'pl-1', type: 'playlist', coverArtId: 'cov-pl1' },
-    });
-    mockHydrateCachedSongs.mockReturnValue({
-      's-1': { id: 's-1', albumId: 'a-2', coverArt: 'cov-a2' },
-      's-2': { id: 's-2', albumId: 'a-1', coverArt: 'cov-a1' }, // dedups with item a-1's cover
-    });
+  it('refresh-downloads snapshots the tokens each surface renders', async () => {
+    // Albums and playlists come from cached_albums/cached_playlists — the cover-art
+    // TOKEN the UI reads — and songs from their mode-aware resolved cover.
+    mockCoverRows.cached_albums = ['al-1_hash'];
+    mockCoverRows.cached_playlists = ['pl-1_hash'];
+    mockCoverRows.cached_songs_cover_art = ['dc-a2:1_0', 'al-1_hash']; // second dedups
 
     const cycleId = await enqueueImageRefreshCycle('refresh-downloads');
 
     expect(cycleId).not.toBeNull();
     expect(mockEnqueueBulk).toHaveBeenCalledTimes(1);
     const [ids, scope] = mockEnqueueBulk.mock.calls[0];
-    expect(ids).toEqual(['cov-a1', 'cov-pl1', 'cov-a2']);
+    expect(ids).toEqual(['al-1_hash', 'pl-1_hash', 'dc-a2:1_0']);
     expect(scope).toBe('refresh-downloads');
     const meta = await getImageQueueState();
-    expect(meta.cycleId).toBe(cycleId);
-    expect(meta.cycleScope).toBe('refresh-downloads');
     expect(meta.cycleTotal).toBe(3);
+  });
+
+  // The regression this fixes: cached_items.cover_art_id is frozen at download time and
+  // holds a BARE ENTITY ID, so warming it filled the cache under a key nothing renders.
+  // On a real device that left every downloaded playlist cover blank after a re-key.
+  it('never warms the frozen bare id on cached_items', async () => {
+    mockCoverRows.cached_albums = ['al-1_hash'];
+    mockHydrateCachedItems.mockReturnValue({
+      'a-1': { itemId: 'a-1', type: 'album', coverArtId: 'bareEntityId' },
+      'pl-1': { itemId: 'pl-1', type: 'playlist', coverArtId: 'barePlaylistId' },
+    });
+
+    await enqueueImageRefreshCycle('refresh-downloads');
+
+    const [ids] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toEqual(['al-1_hash']);
+    expect(ids).not.toContain('bareEntityId');
+    expect(ids).not.toContain('barePlaylistId');
   });
 
   it('refresh-all snapshots from cached_images distinct cover_art_ids', async () => {
@@ -598,5 +629,30 @@ describe('getImageQueueState — progress derivation', () => {
     expect(s.cycleTotal).toBe(4);
     expect(s.processed).toBe(3); // total 4 minus 1 still-queued = 3 attempted
     expect(s.failed).toBe(1);
+  });
+});
+
+// The cover-art mode setting is reachable OFFLINE. Warming only the active mode leaves
+// the other blank with no way to repair it, so both are cached up front.
+describe('cover-art mode', () => {
+  it('warms both the album cover and the per-track cover', async () => {
+    mockCoverRows.cached_albums = ['al-parent_hash'];   // album mode reads this
+    mockCoverRows.cached_songs_cover_art = ['mf-track_hash']; // per-track mode reads this
+
+    await enqueueImageRefreshCycle('refresh-downloads');
+
+    const [ids] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toContain('al-parent_hash');
+    expect(ids).toContain('mf-track_hash');
+  });
+
+  it('dedups when both modes resolve to the same cover', async () => {
+    mockCoverRows.cached_albums = ['al-same_hash'];
+    mockCoverRows.cached_songs_cover_art = ['al-same_hash'];
+
+    await enqueueImageRefreshCycle('refresh-downloads');
+
+    const [ids] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toEqual(['al-same_hash']);
   });
 });

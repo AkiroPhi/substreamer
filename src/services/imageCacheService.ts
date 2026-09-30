@@ -58,7 +58,7 @@ import {
   upsertCachedImage,
   type CacheBrowserFilter,
 } from '../store/persistence/imageCacheTable';
-import { isDbHealthy } from '../store/persistence/db';
+import { getDb, isDbHealthy } from '../store/persistence/db';
 import { hydrateCachedItems, hydrateCachedSongs } from '../store/persistence/musicCacheTables';
 import { musicCacheStore } from '../store/musicCacheStore';
 import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
@@ -2536,21 +2536,49 @@ function generateCycleId(): string {
  * Returns the deduped list.
  */
 function snapshotDownloadedCoverArtIds(): string[] {
-  const { items, songCoverArtIds } = hydrateCachedItemsForRecache();
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const it of items) {
-    if (!it.coverArtId) continue;
-    if (it.type !== 'album' && it.type !== 'playlist') continue;
-    if (seen.has(it.coverArtId)) continue;
-    seen.add(it.coverArtId);
-    out.push(it.coverArtId);
-  }
-  for (const id of songCoverArtIds) {
-    if (seen.has(id)) continue;
+  const add = (id: string | null | undefined): void => {
+    if (!id || seen.has(id)) return;
     seen.add(id);
     out.push(id);
+  };
+
+  // Every cover-art TOKEN a downloaded surface can render, in BOTH cover-art modes.
+  //
+  // Mode-independent on purpose. `resolveSongCoverArt` answers for the mode that happens
+  // to be set, so warming through it caches one mode and leaves the other blank — and the
+  // setting is reachable offline, where nothing can be fetched to repair it. Album mode
+  // reads the parent album's token, per-track mode the song's own, so both are warmed and
+  // switching offline just works. Where they are the same value the dedup drops it.
+  //
+  // Never `cached_items.cover_art_id`: that column is frozen at download time and holds a
+  // BARE ENTITY ID, so warming it fills the cache under a key nothing reads. Measured on a
+  // device — no downloaded playlist cover returned after a re-key, and the only albums
+  // that did were ones the user had scrolled past, cached on demand under the right token.
+  const SOURCES: ReadonlyArray<readonly [string, string]> = [
+    ['cached_albums', 'cover_art'],      // album mode, and the album tile itself
+    ['cached_playlists', 'cover_art'],   // the playlist tile
+    ['cached_songs', 'cover_art'],       // per-track mode
+    ['cached_songs', 'cover_art_id'],    // older rows kept the token here instead
+  ];
+  const db = getDb();
+  if (db !== null) {
+    for (const [table, column] of SOURCES) {
+      try {
+        for (const r of db.getAllSync<{ v: string | null }>(
+          `SELECT DISTINCT "${column}" AS v FROM "${table}" WHERE "${column}" IS NOT NULL AND "${column}" <> ''`,
+        )) add(r.v);
+      } catch {
+        // Column or table absent on this install's schema era; the others still apply.
+      }
+    }
+    return out;
   }
+
+  // No database (a stripped OEM ROM): fall back to the store-backed resolver rather than
+  // returning nothing. Mode-aware, so it covers only the active mode — the best available.
+  for (const id of hydrateCachedItemsForRecache().songCoverArtIds) add(id);
   return out;
 }
 
