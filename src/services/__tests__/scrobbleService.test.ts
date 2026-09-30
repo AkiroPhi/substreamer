@@ -258,8 +258,7 @@ describe('processScrobbles (via addCompletedScrobble)', () => {
       .mockResolvedValueOnce(undefined);
     mockGetApi.mockReturnValue({ scrobble: mockScrobble });
 
-    addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
-    await new Promise((r) => setTimeout(r, 50));
+    await addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
 
     expect(mockScrobble).toHaveBeenCalledTimes(2);
     expect(pendingScrobbleStore.getState().pendingScrobbles).toHaveLength(0);
@@ -270,8 +269,7 @@ describe('processScrobbles (via addCompletedScrobble)', () => {
     const mockScrobble = jest.fn().mockRejectedValue(new Error('fail'));
     mockGetApi.mockReturnValue({ scrobble: mockScrobble });
 
-    addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
-    await new Promise((r) => setTimeout(r, 50));
+    await addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
 
     expect(mockScrobble).toHaveBeenCalledTimes(2);
     expect(pendingScrobbleStore.getState().pendingScrobbles).toHaveLength(1);
@@ -308,8 +306,7 @@ describe('processScrobbles (via addCompletedScrobble)', () => {
 
   it('does nothing when api is null', async () => {
     mockGetApi.mockReturnValue(null);
-    addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
-    await new Promise((r) => setTimeout(r, 50));
+    await addCompletedScrobble({ id: 's1', title: 'Song', artist: 'A' } as any);
     // Scrobble stays in pending since API is unavailable
     expect(pendingScrobbleStore.getState().pendingScrobbles).toHaveLength(1);
   });
