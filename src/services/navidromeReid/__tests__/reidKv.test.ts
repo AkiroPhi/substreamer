@@ -56,9 +56,17 @@ describe('rekeyKvBlobs', () => {
     expect(mockStore.get('substreamer-ratings')).toBe('{not json');
   });
 
-  it('does nothing when the blobs are absent', async () => {
-    await expect(rekeyKvBlobs()).resolves.toBeUndefined();
+  it('does nothing, and reports nothing moved, when the blobs are absent', async () => {
+    await expect(rekeyKvBlobs()).resolves.toBe(0);
     expect(mockStore.size).toBe(0);
+  });
+
+  // The count feeds the completion log. Reporting 0 while ids actually moved is what
+  // made a real defect read as a no-op, so the number has to be the true one.
+  it('reports how many ids actually moved', async () => {
+    write('substreamer-ratings', { overrides: { [LEGACY]: { rating: 4 }, keep: { rating: 2 } } });
+
+    await expect(rekeyKvBlobs()).resolves.toBe(1);
   });
 
   it('is idempotent', async () => {

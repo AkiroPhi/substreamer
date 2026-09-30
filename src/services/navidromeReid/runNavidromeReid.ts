@@ -311,7 +311,7 @@ async function execute(verdict: string): Promise<void> {
     gate.beginStage('updatingDownloads');
     await rekeyPlainColumns(db);
     const superseded = await deleteSupersededRows(db);
-    await rekeyEmbeddedIds(db, (done, total) => {
+    const embedded = await rekeyEmbeddedIds(db, (done, total) => {
       // getState() each time: `gate` is a snapshot taken before any set(), so its
       // `stages` never changes and the guard below would always fire.
       const live = migrationGateStore.getState();
@@ -373,7 +373,7 @@ async function execute(verdict: string): Promise<void> {
 
     // The KV blobs that survive the migration chain. Done before the stores rehydrate, so
     // the rehydrate reads the corrected values rather than writing stale ones back.
-    await rekeyKvBlobs();
+    const kvMoved = await rekeyKvBlobs();
 
     gate.beginStage('finishing');
     // The stores still hold old ids in memory. Until they are rehydrated, any store-driven
@@ -402,7 +402,12 @@ async function execute(verdict: string): Promise<void> {
     setReidState('complete');
     logLibrarySync('[reid] complete');
     appendReidLog('complete', [
-      `ids re-keyed     : ${pairs}`,
+      // Three separate counts on purpose. `pairs` only ever covered the id map, so a
+      // run that re-keyed an envelope reported "ids re-keyed: 0" — which is how a real
+      // defect was read as a no-op. A log nobody can trust is worse than no log.
+      `ids re-keyed     : ${pairs} (plain columns)`,
+      `rows rewritten   : ${embedded} (artwork tokens + embedded json)`,
+      `kv ids moved     : ${kvMoved}`,
       `superseded rows  : ${superseded}`,
       `files moved      : ${files.moved} (missing ${files.missing}, failed ${files.failed})`,
       `tables discarded : ${cleared}`,

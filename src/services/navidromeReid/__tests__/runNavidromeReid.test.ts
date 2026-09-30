@@ -52,11 +52,12 @@ jest.mock('../reidMap', () => ({
 }));
 
 let mockFkOk = true;
+let mockEmbedded = 0;
 jest.mock('../reidRekey', () => ({
   verifyDeferredForeignKeys: () => Promise.resolve(mockFkOk),
   rekeyPlainColumns: record('rekeyPlainColumns'),
   deleteSupersededRows: () => { mockCalls.push('deleteSupersededRows'); return Promise.resolve(0); },
-  rekeyEmbeddedIds: record('rekeyEmbeddedIds'),
+  rekeyEmbeddedIds: () => { mockCalls.push('rekeyEmbeddedIds'); return Promise.resolve(mockEmbedded); },
 }));
 
 let mockFileResult = { moved: 44, missing: 0, failed: 0 };
@@ -64,7 +65,10 @@ jest.mock('../reidFiles', () => ({
   moveDownloadedFiles: () => { mockCalls.push('moveDownloadedFiles'); return Promise.resolve(mockFileResult); },
 }));
 
-jest.mock('../reidKv', () => ({ rekeyKvBlobs: record('rekeyKvBlobs') }));
+let mockKvMoved = 0;
+jest.mock('../reidKv', () => ({
+  rekeyKvBlobs: () => { mockCalls.push('rekeyKvBlobs'); return Promise.resolve(mockKvMoved); },
+}));
 jest.mock('../reidLibrary', () => ({
   discardLibrary: () => { mockCalls.push('discardLibrary'); return Promise.resolve(45); },
 }));
@@ -150,6 +154,8 @@ beforeEach(() => {
   mockCalls.length = 0;
   mockPairs = 3;
   mockFkOk = true;
+  mockEmbedded = 0;
+  mockKvMoved = 0;
   mockFileResult = { moved: 44, missing: 0, failed: 0 };
   mockVerdict = 'run';
   mockCannotAsk = false;
@@ -579,5 +585,24 @@ describe('when to take the screen', () => {
 
     release();
     await run;
+  });
+});
+
+// The completion log is what a user sends when something looks wrong. A line that says
+// "0 re-keyed" on a run that re-keyed things is not a cosmetic defect — it is how the
+// envelope bug was read as a no-op for a whole investigation.
+describe('the completion log counts every rewrite, not just the map', () => {
+  it('reports envelope and KV rewrites that the id map never saw', async () => {
+    mockPairs = 0;      // nothing in plain columns
+    mockEmbedded = 7;   // but seven rows rewritten through canonicalId
+    mockKvMoved = 3;
+
+    await runNavidromeReidIfNeeded();
+
+    const detail = (mockAppendReidLog.mock.calls.find((c) => c[0] === 'complete')?.[1] as string[]).join('\n');
+    expect(detail).toContain('rows rewritten   : 7');
+    expect(detail).toContain('kv ids moved     : 3');
+    // And it must not claim nothing happened.
+    expect(detail).not.toMatch(/^ids re-keyed\s+: 0$/m);
   });
 });

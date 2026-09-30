@@ -59,15 +59,22 @@ function rekeyRecordKeys(record: Record<string, unknown>): Record<string, unknow
  * User-authored with no server copy — a rating the user set by hand is not recoverable
  * from anywhere — and the only one of the three where the ids are the KEYS.
  */
-async function rekeyRatings(): Promise<void> {
+async function rekeyRatings(): Promise<number> {
   const blob = await readBlob(RATINGS_KEY);
   const overrides = blob?.state?.overrides;
-  if (!blob || typeof overrides !== 'object' || overrides === null) return;
-  const next = rekeyRecordKeys(overrides as Record<string, unknown>);
+  if (!blob || typeof overrides !== 'object' || overrides === null) return 0;
+  const before = overrides as Record<string, unknown>;
+  const next = rekeyRecordKeys(before);
+  // Asked directly rather than inferred from the key sets, which would miscount if a
+  // rewritten key collided with another original one. The completion log reports what the
+  // pass actually changed — a count covering only the id map read "0 re-keyed" on a run
+  // that moved ids, and that is how a real defect got read as a no-op.
+  const movedCount = Object.keys(before).filter((k) => moved(k) !== undefined).length;
   await kvStorage.setItem(
     RATINGS_KEY,
     JSON.stringify({ ...blob, state: { ...blob.state, overrides: next } }),
   );
+  return movedCount;
 }
 
 /**
@@ -90,8 +97,9 @@ async function clearAlbumLists(): Promise<void> {
   await kvStorage.setItem(ALBUM_LISTS_KEY, JSON.stringify({ ...blob, state }));
 }
 
-/** Re-key every KV blob that still holds entity ids. */
-export async function rekeyKvBlobs(): Promise<void> {
-  await rekeyRatings();
+/** Re-key every KV blob that still holds entity ids. Returns how many ids moved. */
+export async function rekeyKvBlobs(): Promise<number> {
+  const moved = await rekeyRatings();
   await clearAlbumLists();
+  return moved;
 }
