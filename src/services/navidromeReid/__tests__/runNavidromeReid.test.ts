@@ -216,13 +216,21 @@ describe('the pass ordering', () => {
 });
 
 describe('the pass refuses to write when it should', () => {
-  it('destroys nothing when the map is empty', async () => {
+  // An empty MAP is not an empty pass. The map only sees plain, non-artwork columns;
+  // artwork tokens, JSON envelopes and KV blobs go through `canonicalId` directly and
+  // can hold ids no column holds. Returning early here left a scrobble on a retired id
+  // with the marker stamped complete, and skipped `discardLibrary` so a stale library
+  // was never refilled. Clearing the queues is what the pass is for, not a side effect.
+  it('runs the whole pass even when the map is empty', async () => {
     mockPairs = 0;
     await runNavidromeReidIfNeeded();
 
-    expect(mockCalls).not.toContain('clearLiveQueue');
-    expect(mockCalls).not.toContain('clearImageQueue');
-    expect(mockCalls).not.toContain('discardLibrary');
+    expect(mockCalls).toContain('clearLiveQueue');
+    expect(mockCalls).toContain('clearDownloadQueue');
+    expect(mockCalls).toContain('clearImageQueue');
+    expect(mockCalls).toContain('rekeyEmbeddedIds');
+    expect(mockCalls).toContain('rekeyKvBlobs');
+    expect(mockCalls).toContain('discardLibrary');
     expect(mockCalls).toContain('setReidState:complete');
   });
 
@@ -511,16 +519,65 @@ describe('what the pass records about itself', () => {
     expect(entry?.[2]).toBe('run');
   });
 
-  it('says what it examined when there was nothing to re-key', async () => {
+  // There is no longer a "nothing to do" outcome: a pass that finds no moving ids still
+  // clears, discards and resyncs, and reports itself as complete.
+  it('reports a completed pass even when no ids moved', async () => {
     mockPairs = 0;
 
     await runNavidromeReidIfNeeded();
 
-    const entry = mockAppendReidLog.mock.calls.find((c) => c[0] === 'nothing to do');
+    expect(mockAppendReidLog.mock.calls.find((c) => c[0] === 'nothing to do')).toBeUndefined();
+    const entry = mockAppendReidLog.mock.calls.find((c) => c[0] === 'complete');
     expect(entry).toBeDefined();
-    // Not "every id was already canonical" — that reads as a claim about the library,
-    // which this pass never touches.
-    expect((entry?.[1] as string[]).join(' ')).toContain('local-only');
     expect(entry?.[2]).toBe('run');
+  });
+});
+
+// The interstitial is a one-shot, uninterruptible screen, so it must not appear and
+// vanish. It is taken once the read-only pre-flight is done and the destructive half is
+// about to start — which is every run, including one where no id moves.
+describe('when to take the screen', () => {
+  it('shows the gate for a pass that moves no ids, and does not hide it again', async () => {
+    mockPairs = 0;
+    const seen: boolean[] = [];
+    const unsub = migrationGateStore.subscribe((s) => seen.push(s.visible));
+
+    await runNavidromeReidIfNeeded();
+    unsub();
+
+    expect(mockCalls).toContain('setReidState:complete');
+    // Shown once and never taken away again. arrayContaining would NOT catch this: it
+    // tests membership, not order, and the sequence legitimately starts false.
+    const firstShown = seen.indexOf(true);
+    expect(firstShown).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(firstShown)).not.toContain(false);
+  });
+
+  it('shows the gate once there is work, before anything destructive', async () => {
+    const shownAt: number[] = [];
+    const unsub = migrationGateStore.subscribe((s) => {
+      if (s.visible) shownAt.push(mockCalls.length);
+    });
+
+    await runNavidromeReidIfNeeded();
+    unsub();
+
+    expect(shownAt.length).toBeGreaterThan(0);
+    // The gate must be up before the first destructive call, not after it.
+    expect(shownAt[0]).toBeLessThanOrEqual(mockCalls.indexOf('discardLibrary'));
+    expect(mockCalls).toContain('discardLibrary');
+  });
+
+  // A long wait still needs the screen, even though the pass may then find no work.
+  it('shows the gate while waiting on the library upgrade', async () => {
+    let release = (): void => {};
+    mockEtlInFlight = new Promise<void>((r) => { release = r; });
+    const run = runNavidromeReidIfNeeded();
+    await Promise.resolve();
+
+    expect(migrationGateStore.getState().visible).toBe(true);
+
+    release();
+    await run;
   });
 });

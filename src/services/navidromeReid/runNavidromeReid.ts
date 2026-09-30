@@ -30,7 +30,7 @@ import { ratingStore } from '../../store/ratingStore';
 import { syncStatusStore } from '../../store/syncStatusStore';
 import { clearImageQueue } from '../../store/persistence/imageDownloadQueueTable';
 import { getDb } from '../../store/persistence/db';
-import { buildIdMap, createIdMap, dropIdMap, idMapSize } from './reidMap';
+import { buildIdMap, createIdMap, dropIdMap } from './reidMap';
 import { moveDownloadedFiles } from './reidFiles';
 import { rekeyKvBlobs } from './reidKv';
 import { discardLibrary } from './reidLibrary';
@@ -123,6 +123,34 @@ export function runNavidromeReidIfNeeded(opts: ReidRunOptions = {}): Promise<voi
 }
 
 /**
+ * Resolves once the pass has decided whether it needs the screen — either the gate is up,
+ * so the splash can hand straight over to it, or the pass finished without needing one.
+ *
+ * NOT the pass itself: a real run is minutes long and the splash must not hold for it.
+ * This exists so the read-only pre-flight happens BEHIND the splash instead of in front
+ * of the user, who would otherwise see the app appear and then be covered again.
+ *
+ * No timeout of its own: the splash already fires its own safety timeout regardless, so
+ * a stall here delays the hand-over rather than hanging the app.
+ */
+export function awaitReidDecision(pass: Promise<void>): Promise<void> {
+  if (migrationGateStore.getState().visible) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let unsubscribe: (() => void) | null = null;
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = migrationGateStore.subscribe((state) => { if (state.visible) finish(); });
+    // Either outcome is a decision; a rejection still means the screen is no longer pending.
+    void pass.then(finish, finish);
+  });
+}
+
+/**
  * The user answered the `ask` prompt: their server is updated, run it.
  *
  * Their answer is persisted before the pass starts, so a kill mid-run does not put the
@@ -175,13 +203,25 @@ export function retryNavidromeReid(): Promise<void> {
 async function execute(verdict: string): Promise<void> {
   const gate = migrationGateStore.getState();
   gate.setDeferred(false);
-  gate.show('working');
+
+  /**
+   * Take the screen, once. Deliberately NOT called up front: the pre-flight below
+   * (foreign-key check, building the id map) is read-only and usually fast, and an
+   * install with nothing to re-key would show the interstitial and hide it again — a
+   * flash of a screen that had no business appearing. Nothing about the ORDER of the
+   * pass changes; only when the screen appears.
+   */
+  const showGate = (): void => {
+    if (!migrationGateStore.getState().visible) migrationGateStore.getState().show('working');
+  };
+
   const db = getDb();
   if (!db) {
-    // Show the gate FIRST and fail into it. Returning silently would let the app launch
-    // with the marker still `pending` — and on a resumed run that means rows re-keyed,
-    // files half-moved, and `reconcileMusicCacheAsync` reading the store and deleting
-    // every moved file as an orphan.
+    // Fail INTO the gate. Returning silently would let the app launch with the marker
+    // still `pending` — and on a resumed run that means rows re-keyed, files half-moved,
+    // and `reconcileMusicCacheAsync` reading the store and deleting every moved file as
+    // an orphan.
+    showGate();
     logLibrarySync('[reid] no database — cannot run');
     gate.fail();
     return;
@@ -196,6 +236,8 @@ async function execute(verdict: string): Promise<void> {
   // visible; this closes the other direction.
   const etl = dataModelUpgradeInFlight();
   if (etl) {
+    // Minutes, potentially — the one pre-flight step the user must be told about.
+    showGate();
     // Given its own stage, mirroring the upgrade's own counter. On a large library this
     // wait is minutes long, and a spinner on "Preparing" with nothing moving reads as a
     // hang — the user has no way to tell it is deliberately holding for another job.
@@ -219,13 +261,12 @@ async function execute(verdict: string): Promise<void> {
     }
   }
 
-  gate.beginStage('preparing');
-
   try {
     // Prove the deferral works on THIS build before writing anything. The spike that
     // justified the design ran a different SQLite; if a future op-SQLite bump ever changes
     // the behaviour, the pass must refuse rather than corrupt.
     if (!(await verifyDeferredForeignKeys(db))) {
+      showGate();
       logLibrarySync('[reid] deferred foreign keys unsupported — refusing to run');
       gate.fail();
       return;
@@ -235,20 +276,19 @@ async function execute(verdict: string): Promise<void> {
     const pairs = await buildIdMap(db);
     logLibrarySync(`[reid] map built: ${pairs} ids change`);
 
-    if (pairs === 0 && (await idMapSize(db)) === 0) {
-      // Already canonical — an install that re-synced, or one that joined after the
-      // server migrated. Stamp and stop before clearing anything.
-      await dropIdMap(db);
-      setReidState('complete');
-      gate.hide();
-      logLibrarySync('[reid] nothing to do');
-      appendReidLog('nothing to do', [
-        'no local rows needed re-keying',
-        'the pass only touches local-only data (downloads, listening history, bookmarks);',
-        'the library itself is server-owned and refilled by a sync, never re-keyed here',
-      ], verdict);
-      return;
-    }
+    // NO early exit on an empty map. The map is built from plain, non-artwork columns,
+    // and three of the pass's rewriters do not use it at all — artwork tokens, JSON
+    // envelopes and KV blobs all go through `canonicalId` directly, precisely because
+    // they hold ids that exist in no column. Returning here on `pairs === 0` skipped all
+    // three, and a completed scrobble whose id lived only in `song_json` kept a retired
+    // id while the marker said complete. It also skipped `discardLibrary`, the only
+    // caller of `resetLibrarySync()`, so a stale library was never refilled.
+    //
+    // Zero pairs is not a special case: the map-driven steps are correct no-ops at zero
+    // (`moveDownloadedFiles` returns early on an empty map), and clearing the player and
+    // download queues is what this pass is SUPPOSED to do, not collateral damage.
+    showGate();
+    gate.beginStage('preparing');
 
     // Only now that we know there IS work. Clearing these above the early exit destroyed
     // the saved queue and every queued download for anyone already canonical — a fresh
@@ -377,6 +417,7 @@ async function execute(verdict: string): Promise<void> {
     logLibrarySync(`[reid] failed: ${e instanceof Error ? e.message : String(e)}`);
     appendReidLog('FAILED', [`error: ${e instanceof Error ? e.message : String(e)}`], verdict);
     await flushLibrarySyncLog();
+    showGate();
     gate.fail();
   }
 }

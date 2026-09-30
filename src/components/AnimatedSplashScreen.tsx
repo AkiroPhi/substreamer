@@ -29,7 +29,7 @@ import {
 import { rehydrateAllStores } from '../store/persistence/rehydrate';
 import { isReidRequired } from '../services/navidromeReid/reidMarker';
 import { probeServerVersion } from '../services/navidromeReid/reidProbe';
-import { runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
+import { awaitReidDecision, runNavidromeReidIfNeeded } from '../services/navidromeReid/runNavidromeReid';
 import { migrationStore } from '../store/migrationStore';
 // Synchronous adapter: the splash reads `completedVersion` before the store
 // has hydrated, so it must be a synchronous SQLite read.
@@ -166,7 +166,21 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
           // pre-upgrade one on exactly the launch this pass exists for. Bounded well under
           // the safety timeout, and a failure still leaves library writes refused, so a
           // slow server delays the decision rather than losing it.
-          const decide = (): void => { runNavidromeReidIfNeeded(); setMigrationPhase('done'); };
+          // Hold the splash until the pass has DECIDED, not until it finishes. Firing
+          // and forgetting let the splash go while the pass was still working out
+          // whether it needed the screen, so an install with nothing to re-key showed
+          // the interstitial for an instant and hid it again.
+          //
+          // Checked BEFORE starting it, and only when a pass will actually run: for the
+          // overwhelming majority — not Navidrome, or already done — there is nothing to
+          // wait for, and adding a hop would delay every launch for no one's benefit. An
+          // `ask` prompt raises the gate synchronously, so it holds the app by itself.
+          const decide = (): void => {
+            const willRun = isReidRequired();
+            const pass = runNavidromeReidIfNeeded();
+            if (!willRun) { setMigrationPhase('done'); return; }
+            void awaitReidDecision(pass).then(() => setMigrationPhase('done'));
+          };
           const probe = probeServerVersion();
           if (probe) void probe.then(decide); else decide();
         })
@@ -246,7 +260,13 @@ export default function AnimatedSplashScreen({ onFinish }: Props) {
       // — a re-key triggered by the user's SERVER changing, not by our schema, has to be
       // reachable here too. The fade waits on the probe: this path fades immediately, so
       // deciding after it would let the splash finish first and the app launch unguarded.
-      const decide = (): void => { runNavidromeReidIfNeeded(); fadeOut(); };
+      const decide = (): void => {
+        // See the other decide(): only wait when a pass is genuinely about to run.
+        const willRun = isReidRequired();
+        const pass = runNavidromeReidIfNeeded();
+        if (!willRun) { fadeOut(); return; }
+        void awaitReidDecision(pass).then(fadeOut);
+      };
       const probe = probeServerVersion();
       if (probe) void probe.then(decide); else decide();
       return;
