@@ -27,6 +27,7 @@ import Animated, {
 
 import { useServerReachable } from '../hooks/useServerReachable';
 import { recheckNow } from '../services/connectivityService';
+import { PAUSED_AMBER } from './bannerColors';
 import { downloadedMetadataRefreshStore } from '../store/downloadedMetadataRefreshStore';
 
 const CAPSULE_HEIGHT = 44;
@@ -109,14 +110,14 @@ export const DownloadedMetadataBanner = memo(function DownloadedMetadataBanner()
         >
           <Animated.View style={[styles.capsule, capsuleStyle]}>
             <Ionicons
-              name={stalled ? 'cloud-offline-outline' : 'sync'}
+              name={stalled ? 'cloud-offline' : 'sync'}
               size={16}
-              color={ACCENT_BLUE}
+              color={stalled ? PAUSED_AMBER : ACCENT_BLUE}
             />
             <Text style={styles.label} numberOfLines={1}>
               {`${label}${countText}`}
             </Text>
-            {canRetry && <Ionicons name="refresh" size={15} color={ACCENT_BLUE} />}
+            {canRetry && <Ionicons name="refresh" size={15} color={PAUSED_AMBER} />}
           </Animated.View>
         </Pressable>
       </View>

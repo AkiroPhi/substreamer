@@ -20,6 +20,8 @@ import {
 
 import { useServerReachable } from '../hooks/useServerReachable';
 import { recheckNow } from '../services/connectivityService';
+import { PAUSED_AMBER } from './bannerColors';
+
 import type { IoniconsName } from '../utils/iconNames';
 const CAPSULE_HEIGHT = 44;
 const CAPSULE_BORDER_RADIUS = CAPSULE_HEIGHT / 2;
@@ -33,7 +35,7 @@ const SHRINK_EASING = Easing.in(Easing.cubic);
 const LAYOUT_EASING = Easing.inOut(Easing.cubic);
 
 const ACCENT_BLUE = '#1D9BF0';
-const WARNING_AMBER = '#FF9500';
+
 const ERROR_RED = '#FF453A';
 
 /** Hide the banner entirely for tiny libraries where the walk finishes in seconds. */
@@ -72,7 +74,7 @@ function getVariant(
   if (phase === 'paused-offline') {
     return {
       icon: 'cloud-offline',
-      iconColor: WARNING_AMBER,
+      iconColor: PAUSED_AMBER,
       label: t('syncPausedOffline'),
       tappable: true,
       action: 'retry',
@@ -139,7 +141,7 @@ function getListVariant(
   if (phase === 'paused-offline') {
     return {
       icon: 'cloud-offline',
-      iconColor: WARNING_AMBER,
+      iconColor: PAUSED_AMBER,
       label: t('syncPausedOffline'),
       tappable: true,
       action: 'retry',
@@ -148,7 +150,7 @@ function getListVariant(
   if (phase === 'paused-error') {
     return {
       icon: 'alert-circle',
-      iconColor: WARNING_AMBER,
+      iconColor: PAUSED_AMBER,
       label: t('syncPausedError'),
       tappable: true,
     };

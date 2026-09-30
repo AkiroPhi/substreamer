@@ -23,6 +23,7 @@ import Animated, {
 import { useServerReachable } from '../hooks/useServerReachable';
 import { recheckNow } from '../services/connectivityService';
 import { dismissImageCacheErrorBanner } from '../services/imageCacheService';
+import { PAUSED_AMBER } from './bannerColors';
 import { imageDownloadQueueStore } from '../store/imageDownloadQueueStore';
 
 const CAPSULE_HEIGHT = 44;
@@ -131,11 +132,11 @@ export const ImageCacheBanner = memo(function ImageCacheBanner() {
                   : isPaused
                     ? 'pause'
                     : stalled
-                      ? 'cloud-offline-outline'
+                      ? 'cloud-offline'
                       : 'sync'
               }
               size={16}
-              color={isError ? ERROR_RED : ACCENT_BLUE}
+              color={isError ? ERROR_RED : stalled ? PAUSED_AMBER : ACCENT_BLUE}
             />
             <Text style={styles.label} numberOfLines={1}>
               {isError ? errorLabel : `${progressLabel}${countText}`}
@@ -143,7 +144,7 @@ export const ImageCacheBanner = memo(function ImageCacheBanner() {
             {isError ? (
               <Ionicons name="close" size={15} color="rgba(255, 255, 255, 0.55)" />
             ) : canRetry ? (
-              <Ionicons name="refresh" size={15} color={ACCENT_BLUE} />
+              <Ionicons name="refresh" size={15} color={PAUSED_AMBER} />
             ) : null}
           </Animated.View>
         </Pressable>
