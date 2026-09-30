@@ -1,5 +1,23 @@
 # Changelog
 
+## [8.1.1] - 2026-09-30
+
+- ci: update coverage badge [skip ci]
+- fix(navidrome-reid): restore downloaded artwork as the pass's final task
+- fix(scrobbles): give the queue drain something to await
+- feat(banners): one colour for "paused waiting on connectivity"
+- fix(navidrome-reid): the completion log under-reported what the pass changed
+- ci: update coverage badge [skip ci]
+- fix(navidrome-reid): run the pass, instead of deciding from a partial measurement
+- fix(navidrome-reid): the shared log misreported why the pass ran
+- feat(navidrome-reid): show what the pass is waiting for, not a dead spinner
+- fix(animations): cards could vanish for the life of the screen
+- chore(sim-snapshots): restore fixtures onto Android, from either platform
+- fix(banners): say what is paused and why, and offer a retry
+- feat(navidrome-reid): ask before interrupting a live session, and say when the pass is waiting
+- feat(navidrome-reid): car keeps working when deferred, and the pass logs where users can see it
+- fix(navidrome-reid): close the connectivity gaps the scenario walkthrough found
+- fix(navidrome-reid): never run the pass, or trust the probe, without a server
 ## [8.1.0] - 2026-09-28
 
 - ci: update coverage badge [skip ci]
