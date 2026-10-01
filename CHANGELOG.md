@@ -1,5 +1,10 @@
 # Changelog
 
+## [8.1.2] - 2026-10-01
+
+- docs(agents): bundle missed commits instead of splitting them
+- feat(downloads): refresh covers and downloads from Settings
+- ci: update coverage badge [skip ci]
 ## [8.1.1] - 2026-09-30
 
 - ci: update coverage badge [skip ci]
