@@ -18,7 +18,7 @@ import { Platform } from 'react-native';
 import { defaultCollator } from '../utils/intl';
 
 import { migrateV3BackupMetas, migrateV4BackupMetas } from './backupService';
-import { clearImageCache } from './imageCacheService';
+import { clearImageCache, enqueueImageRefreshCycle } from './imageCacheService';
 import { deviceIdentityStore } from '../store/deviceIdentityStore';
 import {
   completedScrobbleStore,
@@ -1905,9 +1905,7 @@ const MIGRATION_TASKS: MigrationTask[] = [
       //
       // Wiping the entire cache here is safe — on-demand re-fetch via
       // CachedImage's `ensureCached` repopulates with the new entity-ID-
-      // keyed files as soon as the user lands on a screen. For
-      // offline-first users, Settings → Image Cache → "Refresh
-      // Downloaded" eager-repopulates while online.
+      // keyed files as soon as the user lands on a screen.
       try {
         const freed = await clearImageCache();
         log(`[m25] wiped image cache, freed=${freed} bytes`);
@@ -2012,12 +2010,8 @@ const MIGRATION_TASKS: MigrationTask[] = [
         log(`[m29] wipe failed: ${errMessage(e)}`);
       }
       // Re-warm downloaded covers so offline-first users get them back the next
-      // time they're online. The snapshot is mode-aware (album vs per-track),
-      // so it fetches the correct coverArt value per the current setting.
+      // time they're online, under the coverArt values each surface renders.
       try {
-        const { enqueueImageRefreshCycle } = require('./imageCacheService') as {
-          enqueueImageRefreshCycle: (scope: string) => Promise<string | null>;
-        };
         const cycleId = await enqueueImageRefreshCycle('refresh-downloads');
         log(`[m29] queued downloaded-cover re-warm cycle=${cycleId ?? 'none'}`);
       } catch (e) {
@@ -2170,7 +2164,7 @@ const MIGRATION_TASKS: MigrationTask[] = [
   },
 
   {
-    // 41 is reserved by the commented-out legacy-blob drop at the foot of this list.
+    // 41 is unused — see the commented-out legacy-blob drop at the foot of this list.
     id: 42,
     name: 'Move MBID corrections and scrobble exclusions into their tables',
     run: async (log) => {
@@ -2220,28 +2214,27 @@ const MIGRATION_TASKS: MigrationTask[] = [
   // until the final release is verified; uncomment to enable. It takes the NEXT free id
   // — 43 — because a task numbered below the highest that has shipped never runs for
   // anyone who has already passed it (`getPendingTasks` returns `id > completedVersion`);
-  // 35, 37 and 41 were all skipped that way as 36, 38 and 42 shipped.
+  // 35, 37 and 41 were all skipped that way as 36, 38 and 42 shipped. Enabling it also
+  // needs `import { checkpointWalAsync, migrateBlobsToNormalized } from
+  // '../db/migrateNormalized';` at the top of this file.
   //
   // {
   //   id: 43,
   //   name: 'Migrate any remaining blob data, then drop the legacy blob tables',
   //   run: async (log) => {
-  //     const { getDb } = require('../store/persistence/db') as { getDb: () => any };
   //     const db = getDb();
-  //     if (db === null) { log('[m35] db unavailable — skipping'); return; }
+  //     if (db === null) { log('[m43] db unavailable — skipping'); return; }
   //     // Final catch-up FIRST (idempotent): recover any un-migrated blob data into the
   //     // normalized model before the tables vanish.
-  //     const { migrateBlobsToNormalized, checkpointWalAsync } =
-  //       require('../db/migrateNormalized') as typeof import('../db/migrateNormalized');
   //     await migrateBlobsToNormalized(db, log);
   //     for (const t of ['library_albums', 'song_index', 'album_details']) {
   //       await db.runAsync(`DROP TABLE IF EXISTS ${t};`);
-  //       log(`[m35] dropped ${t}`);
+  //       log(`[m43] dropped ${t}`);
   //     }
   //     // Reclaim the freed pages so the DB file actually shrinks.
   //     await checkpointWalAsync(db, log);
   //     await db.runAsync('VACUUM;');
-  //     log('[m35] reclaimed space');
+  //     log('[m43] reclaimed space');
   //   },
   // },
   // -------------------------------------------------------------------

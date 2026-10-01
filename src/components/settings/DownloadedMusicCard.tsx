@@ -25,6 +25,9 @@ import {
 } from '../../services/fullLibraryDownloadService';
 import { clearQueuedDownloads } from '../../services/musicCacheService';
 import { refreshDownloadedMetadata } from '../../services/downloadedMetadataService';
+import { enqueueImageRefreshCycle } from '../../services/imageCacheService';
+import { refreshPlaylistLibrary } from '../../services/normalizedLibrarySync';
+import { imageDownloadQueueStore } from '../../store/imageDownloadQueueStore';
 import { fireAndForget } from '../../utils/fireAndForget';
 import { formatBytes } from '../../utils/formatters';
 import { SettingsSectionTitle } from './SettingsSectionTitle';
@@ -55,17 +58,25 @@ export function DownloadedMusicCard() {
   const metaRefreshDone = downloadedMetadataRefreshStore((s) => s.done);
   const metaRefreshTotal = downloadedMetadataRefreshStore((s) => s.total);
 
-  const handleRefreshMetadata = useCallback(() => {
+  const coverRefreshActive = imageDownloadQueueStore((s) => s.cycleId !== null && s.cycleTotal > 0);
+
+  const handleRefreshCovers = useCallback(() => {
+    fireAndForget(enqueueImageRefreshCycle('refresh-downloads'), 'settings.refreshDownloadedCovers');
+  }, []);
+
+  const handleRefreshDownloads = useCallback(() => {
     // The button stays enabled unless offline mode, but a refresh needs a reachable
     // server or every fetch stalls on a timeout. Both cases get the same message
     // rather than a doomed pass.
     if (offlineMode || !connectivityStore.getState().isServerReachable) {
-      alert(t('refreshDownloadedMetadata'), t('refreshMetadataOffline'));
+      alert(t('refreshDownloads'), t('refreshDownloadsOffline'));
       return;
     }
+    // The playlist-list refresh runs the changed-playlist reconcile, which syncs each
+    // downloaded playlist's tracks to the server's.
     fireAndForget(
-      refreshDownloadedMetadata({ mode: 'all' }),
-      'settings.refreshDownloadedMetadata',
+      refreshDownloadedMetadata({ mode: 'all' }).then(() => refreshPlaylistLibrary()),
+      'settings.refreshDownloads',
     );
   }, [offlineMode, alert, t]);
 
@@ -189,11 +200,29 @@ export function DownloadedMusicCard() {
             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
           </Pressable>
 
-          {/* Refresh metadata — re-caches detail + cover art for downloaded items
-              so offline never loses their metadata. Always shown; disabled only
-              in offline mode. */}
           <Pressable
-            onPress={handleRefreshMetadata}
+            onPress={handleRefreshCovers}
+            disabled={!online || coverRefreshActive}
+            style={({ pressed }) => [
+              settingsStyles.navRow,
+              { borderTopColor: colors.border },
+              (!online || coverRefreshActive || pressed) && settingsStyles.pressed,
+            ]}
+          >
+            <View style={settingsStyles.navRowLeft}>
+              <Ionicons name="images-outline" size={18} color={colors.textPrimary} />
+              <Text style={[settingsStyles.navRowText, { color: colors.textPrimary }]}>
+                {t('refreshDownloadedCovers')}
+              </Text>
+            </View>
+            {coverRefreshActive && <ActivityIndicator size="small" color={colors.primary} />}
+          </Pressable>
+
+          {/* Refresh downloads — re-caches detail + cover art for downloaded items
+              and syncs downloaded playlists with the server. Always shown; disabled
+              only in offline mode. */}
+          <Pressable
+            onPress={handleRefreshDownloads}
             disabled={offlineMode || metaRefreshActive}
             style={({ pressed }) => [
               settingsStyles.navRow,
@@ -209,7 +238,7 @@ export function DownloadedMusicCard() {
                       done: metaRefreshDone,
                       total: metaRefreshTotal,
                     })
-                  : t('refreshDownloadedMetadata')}
+                  : t('refreshDownloads')}
               </Text>
             </View>
             {metaRefreshActive && <ActivityIndicator size="small" color={colors.primary} />}

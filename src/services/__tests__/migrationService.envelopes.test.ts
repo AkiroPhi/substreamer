@@ -18,6 +18,7 @@ jest.mock('../../store/persistence/kvStorage', () =>
 // bridge under Jest.
 jest.mock('../imageCacheService', () => ({
   clearImageCache: jest.fn(async () => 0),
+  enqueueImageRefreshCycle: jest.fn(async () => null),
 }));
 
 // Migration 21 imports deviceIdentityStore which transitively pulls

@@ -2583,9 +2583,10 @@ function snapshotDownloadedCoverArtIds(): string[] {
 }
 
 async function snapshotAllCachedCoverArtIds(): Promise<string[]> {
-  // Distinct cover_art_ids across cached_images (every cover that has at
-  // least one variant on disk). Already returned distinct + sorted.
-  return getAllCachedCoverArtIds();
+  // Every cover already on disk, plus every downloaded cover — those must be on disk
+  // for offline, so a refresh fetches them even if they were never cached.
+  const cached = await getAllCachedCoverArtIds();
+  return [...new Set([...cached, ...snapshotDownloadedCoverArtIds()])];
 }
 
 /**

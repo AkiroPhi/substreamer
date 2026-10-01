@@ -18,6 +18,7 @@ jest.mock('../../store/persistence/kvStorage', () => require('../../store/persis
 // require in production code.
 jest.mock('../imageCacheService', () => ({
   clearImageCache: jest.fn(async () => 0),
+  enqueueImageRefreshCycle: jest.fn(async () => null),
 }));
 
 // The runner REFUSES to run when the DB is unavailable: a version misread as 0 must
@@ -89,6 +90,14 @@ jest.mock('../../store/persistence/musicCacheTables', () => ({
   upsertCachedItem: jest.fn(),
   // Task 17 schema helper.
   addColumnIfMissing: jest.fn(() => false),
+  // Task 39 reads the download queue's payload rows.
+  readDownloadQueuePayloadRowsAsync: jest.fn(async () => []),
+}));
+
+// Task 42 moves MBID overrides out of the KV blob that the Task 5/8 tests read back.
+// Its own suite covers it (userDataRows.test.ts).
+jest.mock('../../store/persistence/userDataMigration', () => ({
+  migrateUserDataFromKv: jest.fn(async () => {}),
 }));
 
 // Task 14 consults albumDetailStore for albumId resolution when a playlist
@@ -158,6 +167,7 @@ import { bulkReplace } from '../../store/persistence/musicCacheTables';
 import { replaceAllPendingScrobbles } from '../../store/persistence/pendingScrobbleTable';
 import { backfillScrobbleColumnsAsync, replaceAllScrobbles } from '../../store/persistence/scrobbleTable';
 import { kvStorage } from '../../store/persistence';
+import { clearImageCache, enqueueImageRefreshCycle } from '../imageCacheService';
 
 const mockReplaceAllScrobbles = replaceAllScrobbles as jest.Mock;
 const mockReplaceAllPendingScrobbles = replaceAllPendingScrobbles as jest.Mock;
@@ -1822,6 +1832,38 @@ describe('Task 24 – Backfill primary server URL for failover schema', () => {
 
     const restored = JSON.parse(kvStorage.getItem('substreamer-auth') as string);
     expect(restored.state.primaryServerUrl).toBeUndefined();
+  });
+});
+
+describe('Task 29 – Re-key image cache to the coverArt-value model', () => {
+  const mockClear = clearImageCache as jest.MockedFunction<typeof clearImageCache>;
+  const mockEnqueue = enqueueImageRefreshCycle as jest.MockedFunction<typeof enqueueImageRefreshCycle>;
+
+  beforeEach(() => {
+    mockClear.mockClear();
+    mockEnqueue.mockReset();
+    mockFileWrite.mockClear();
+  });
+
+  it('wipes the image cache, then queues a downloaded-cover re-warm', async () => {
+    mockEnqueue.mockResolvedValue('cyc-1');
+
+    await runMigrations(28);
+
+    expect(mockClear).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue).toHaveBeenCalledWith('refresh-downloads');
+    expect(mockClear.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEnqueue.mock.invocationCallOrder[0],
+    );
+    expect(mockFileWrite.mock.calls[0][0]).toContain('[m29] queued downloaded-cover re-warm cycle=cyc-1');
+  });
+
+  it('logs an enqueue failure and still completes the chain', async () => {
+    mockEnqueue.mockRejectedValue(new Error('queue down'));
+
+    await expect(runMigrations(28)).resolves.toBe(LATEST_MIGRATION_ID);
+
+    expect(mockFileWrite.mock.calls[0][0]).toContain('[m29] recache enqueue failed: queue down');
   });
 });
 

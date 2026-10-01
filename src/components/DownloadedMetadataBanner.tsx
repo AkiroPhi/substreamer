@@ -3,7 +3,7 @@
  * re-caching album/playlist detail + cover art for downloaded items so offline
  * views never lose their metadata. Driven by `downloadedMetadataRefreshStore`,
  * so it surfaces BOTH the proactive startup backfill and the
- * manual "Refresh metadata" settings button, anywhere in the app.
+ * manual "Refresh downloads" settings button, anywhere in the app.
  *
  * Visual language matches `ImageCacheBanner` / `LibrarySyncBanner` — dark
  * capsule centred below the header, rendered via the priority ladder in

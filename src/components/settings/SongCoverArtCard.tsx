@@ -36,7 +36,7 @@ export function SongCoverArtCard() {
       setSongCoverArtMode(next);
       // The resolved cover for every downloaded track changes with the mode, so
       // the new mode's covers may not be on disk yet. Re-warm downloaded covers
-      // (mode-aware snapshot) so they survive offline. Best-effort, online only.
+      // (both modes' tokens) so they survive offline. Best-effort, online only.
       if (!offlineModeStore.getState().offlineMode) {
         fireAndForget(enqueueImageRefreshCycle('refresh-downloads'), 'songCoverArtMode-recache');
       }

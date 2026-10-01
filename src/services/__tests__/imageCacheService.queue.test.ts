@@ -326,6 +326,18 @@ describe('enqueueImageRefreshCycle', () => {
     expect(scope).toBe('refresh-all');
   });
 
+  it('refresh-all also covers downloaded covers that were never cached', async () => {
+    mockGetAllCachedCoverArtIds.mockReturnValue(['cov-a', 'al-1_hash']);
+    mockCoverRows.cached_albums = ['al-1_hash'];
+    mockCoverRows.cached_playlists = ['pl-1_hash'];
+
+    await enqueueImageRefreshCycle('refresh-all');
+
+    const [ids, scope] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toEqual(['cov-a', 'al-1_hash', 'pl-1_hash']);
+    expect(scope).toBe('refresh-all');
+  });
+
   it('returns null when the scope has no ids', async () => {
     const cycleId = await enqueueImageRefreshCycle('refresh-all');
     expect(cycleId).toBeNull();

@@ -4,7 +4,7 @@
  * Downloads carry their own metadata (see the download flow in `musicCacheService`),
  * so offline is just a filtered view over cached data. This pass repairs downloaded
  * items whose detail/art is missing, and backs both the proactive migration and the
- * manual "Refresh downloaded metadata" settings button.
+ * manual "Refresh downloads" settings button.
  *
  * - `missing`: only fetch detail that isn't already cached (cheap; migration).
  * - `all`: re-fetch everything (manual refresh / update).

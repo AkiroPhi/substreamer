@@ -353,7 +353,7 @@ async function resumeFlowBody(): Promise<void> {
       // clears to 'done' only when nothing is left missing. A pass that makes NO
       // progress counts toward a cap, so permanently-unfetchable items (deleted
       // albums, chronic errors) can't loop forever — on-demand browse and the manual
-      // "Refresh metadata" button still cover the rest.
+      // "Refresh downloads" button still cover the rest.
       {
         const conn = connectivityStore.getState();
         if (
