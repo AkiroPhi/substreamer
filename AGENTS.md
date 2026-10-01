@@ -431,6 +431,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - **Never invent evidence.** No fabricated user anecdotes or observations to support an argument.
 - **Re-index Symdex after every commit** — its AST snapshot goes stale and post-commit searches silently return old results.
 - **Don't paste plan/tracker contents back into chat.** Summarize the headlines; the file is the artifact.
+- **Commit as you go; never spend time splitting a missed commit.** If changes piled up and do not separate cleanly by whole file, bundle them into one commit — no hand-built intermediate file states, no asking how to split.
 - Affirmative action in a confirmation dialog uses a positive label (OK/Delete), never Cancel.
 - Shares exist for albums, playlists and the player queue — not individual songs.
 - Drop a one-line status note when working silently for a long stretch.
