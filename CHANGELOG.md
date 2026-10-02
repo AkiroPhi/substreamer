@@ -1,5 +1,9 @@
 # Changelog
 
+## [8.1.4] - 2026-10-02
+
+- release: v8.1.3
+- ci: update coverage badge [skip ci]
 ## [8.1.3] - 2026-10-02
 
 - No notable changes
