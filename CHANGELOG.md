@@ -1,5 +1,8 @@
 # Changelog
 
+## [8.1.3] - 2026-10-02
+
+- No notable changes
 ## [8.1.2] - 2026-10-01
 
 - docs(agents): bundle missed commits instead of splitting them
