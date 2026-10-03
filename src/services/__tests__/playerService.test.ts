@@ -118,6 +118,7 @@ import {
   clearQueue,
   addToQueue,
   removeFromQueue,
+  removeNonDownloadedTracks,
   cycleRepeatMode,
   applyPlaybackRate,
   shuffleQueue,
@@ -603,6 +604,56 @@ describe('removeFromQueue', () => {
   });
 });
 
+describe('removeNonDownloadedTracks', () => {
+  const { getLocalTrackUri } = jest.requireMock('../musicCacheService');
+  const downloaded = (...ids: string[]) =>
+    (getLocalTrackUri as jest.Mock).mockImplementation((id: string) => (ids.includes(id) ? `/local/${id}` : null));
+
+  afterEach(() => {
+    (getLocalTrackUri as jest.Mock).mockReset().mockReturnValue(null);
+  });
+
+  it('removes streamed tracks but keeps the playing one', async () => {
+    const queue = ['a', 'b', 'c', 'd'].map((id) => makeChild(id));
+    await playTrack(queue[2], queue);
+    downloaded('b');
+    mockTP.getCurrentTrackIndex.mockReturnValue(2);
+    mockTP.removeFromQueue.mockClear();
+    mockTP.clearQueue.mockClear();
+
+    await removeNonDownloadedTracks();
+
+    expect(mockTP.removeFromQueue.mock.calls).toEqual([[[3]], [[0]]]);
+    expect(mockTP.clearQueue).not.toHaveBeenCalled();
+  });
+
+  it('clears the queue when every track is streamed', async () => {
+    const queue = ['a', 'b'].map((id) => makeChild(id));
+    await playTrack(queue[0], queue);
+    downloaded();
+    mockTP.removeFromQueue.mockClear();
+    mockTP.clearQueue.mockClear();
+
+    await removeNonDownloadedTracks();
+
+    expect(mockTP.clearQueue).toHaveBeenCalled();
+    expect(mockTP.removeFromQueue).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when every track is downloaded', async () => {
+    const queue = ['a', 'b'].map((id) => makeChild(id));
+    await playTrack(queue[0], queue);
+    downloaded('a', 'b');
+    mockTP.removeFromQueue.mockClear();
+    mockTP.clearQueue.mockClear();
+
+    await removeNonDownloadedTracks();
+
+    expect(mockTP.removeFromQueue).not.toHaveBeenCalled();
+    expect(mockTP.clearQueue).not.toHaveBeenCalled();
+  });
+});
+
 describe('cycleRepeatMode', () => {
   it('off -> all (queue)', async () => {
     playbackSettingsStore.setState({ repeatMode: 'off' } as any);
@@ -777,6 +828,39 @@ describe('playback-report scrobble', () => {
     expect(addCompletedScrobble).not.toHaveBeenCalled();
     emit('trackChange', { id: 't2' }, 1, 'auto-advance');
     expect(addCompletedScrobble).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), undefined);
+  });
+
+  describe('after removing a track above the playing one', () => {
+    // Queue t0, t1, t2 with t1 playing at index 1. Removing t0 moves t1 to index 0;
+    // native reports that new index on later milestones and gives no track change.
+    async function armMiddle(trigger: number) {
+      playbackSettingsStore.setState({ scrobbleTrigger: trigger } as any);
+      const queue = [makeChild('t0'), makeChild('t1'), makeChild('t2')];
+      await playTrack(queue[1], queue);
+      emit('trackChange', { id: 't1' }, 1, 'queue-replaced');
+      jest.clearAllMocks();
+    }
+
+    it('does not scrobble the playing track a second time when it ends', async () => {
+      await armMiddle(50);
+      emit('milestone', 50, 1);
+      mockTP.getCurrentTrackIndex.mockReturnValue(0);
+      await removeFromQueue(0);
+      emit('milestone', 75, 0);
+      emit('trackChange', { id: 't2' }, 1, 'auto-advance');
+      expect(addCompletedScrobble).toHaveBeenCalledTimes(1);
+      expect(addCompletedScrobble).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), undefined);
+    });
+
+    it('scrobbles the playing track, not the next one, on completion (trigger 100)', async () => {
+      await armMiddle(100);
+      emit('milestone', 90, 1);
+      mockTP.getCurrentTrackIndex.mockReturnValue(0);
+      await removeFromQueue(0);
+      emit('trackChange', { id: 't2' }, 1, 'auto-advance');
+      expect(addCompletedScrobble).toHaveBeenCalledTimes(1);
+      expect(addCompletedScrobble).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), undefined);
+    });
   });
 
   it('re-scrobbles each repeat-one loop (milestone value wraps down)', async () => {

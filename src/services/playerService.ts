@@ -905,8 +905,10 @@ export async function removeFromQueue(index: number): Promise<void> {
   currentChildQueue = currentChildQueue.filter((_, i) => i !== index);
   playerStore.getState().setQueue(currentChildQueue);
 
-  // Re-sync the active index from native (recomputed on removal).
+  // Re-sync the active index from native (recomputed on removal). The scrobble
+  // guard follows it too, or the next milestone reads as a new play.
   const nativeIndex = tp.getCurrentTrackIndex();
+  if (activeScrobbleIndex != null && nativeIndex >= 0) activeScrobbleIndex = nativeIndex;
   playerStore.getState().setCurrentTrack(
     playerStore.getState().currentTrack,
     nativeIndex >= 0 ? nativeIndex : null,
@@ -937,7 +939,10 @@ export async function removeNonDownloadedTracks(): Promise<void> {
     return;
   }
 
+  // The playing track stays: native won't remove it, and the JS queue must match native.
+  const playingIndex = tp.getCurrentTrackIndex();
   for (const index of indicesToRemove) {
+    if (index === playingIndex) continue;
     await removeFromQueue(index);
   }
 }

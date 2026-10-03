@@ -82,17 +82,21 @@ export const QueueItemRow = memo(function QueueItemRow({
   const durationText =
     track.duration != null ? formatTrackDuration(track.duration) : '—';
 
+  // The playing track can't be removed from the queue, so its row offers no remove action.
   const rightActions: SwipeAction[] = useMemo(
-    () => [
-      {
-        icon: 'trash-outline',
-        color: colors.red,
-        label: t('remove'),
-        onPress: handleRemove,
-        removesRow: true,
-      },
-    ],
-    [colors.red, handleRemove, t],
+    () =>
+      isActive
+        ? []
+        : [
+            {
+              icon: 'trash-outline',
+              color: colors.red,
+              label: t('remove'),
+              onPress: handleRemove,
+              removesRow: true,
+            },
+          ],
+    [isActive, colors.red, handleRemove, t],
   );
 
   const leftActions: SwipeAction[] = useMemo(
@@ -118,7 +122,7 @@ export const QueueItemRow = memo(function QueueItemRow({
   );
 
   return (
-    <SwipeableRow rightActions={rightActions} leftActions={leftActions} enableFullSwipeRight enableFullSwipeLeft={!offlineMode} restingBackgroundColor="transparent" onPress={handlePress} onLongPress={onLongPress ? handleLongPress : undefined}>
+    <SwipeableRow rightActions={rightActions} leftActions={leftActions} enableFullSwipeRight={!isActive} enableFullSwipeLeft={!offlineMode} restingBackgroundColor="transparent" onPress={handlePress} onLongPress={onLongPress ? handleLongPress : undefined}>
       <View style={[styles.row, { borderBottomColor: colors.border }]}>
         {/* Cover art with now-playing overlay */}
         <View style={styles.coverWrap}>
