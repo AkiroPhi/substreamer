@@ -428,6 +428,8 @@ When the user corrects your approach, append a one-line rule here before ending 
 - **Fix native-layer inconsistencies in native code**, not with JS workarounds.
 - **Verify a subagent's findings yourself** before acting on them, and before reporting them as fact. They are frequently right and occasionally confidently wrong.
 - **Run sub-agents one at a time** on multi-phase work — protects context and avoids conflicting edits.
+- **Never propose a fix for a symptom whose mechanism you have not observed.** A confirmed defect found on the way is not the cause until evidence links it to the symptom. Report the unexplained part as unexplained, and propose how to get the evidence, not a fix.
+- **Read the app's existing settings and behaviour before asking the owner for a product decision.** If the app already defines it (e.g. the scrobble threshold `scrobbleTrigger`), that is the answer; do not propose a new rule.
 - **Never invent evidence.** No fabricated user anecdotes or observations to support an argument.
 - **Re-index Symdex after every commit** — its AST snapshot goes stale and post-commit searches silently return old results.
 - **Don't paste plan/tracker contents back into chat.** Summarize the headlines; the file is the artifact.
