@@ -27,6 +27,7 @@ import { onAppForeground } from '../utils/onAppForeground';
 import i18n from '../i18n/i18n';
 import {
   listDirectoryAsync,
+  listDirectoryWithSizesAsync,
   getDirectorySizeAsync,
   downloadFileAsyncWithProgress,
   deleteDirectoryAsync,
@@ -56,6 +57,7 @@ import {
   readDownloadQueueSongRefsAsync,
   readDownloadQueueSongsAsync,
   readQueuedSongStatus,
+  type CachedSongBytesUpdate,
 } from '../store/persistence/musicCacheTables';
 import { logImageCache } from './imageCacheLogger';
 import { logLibrarySync } from './librarySyncLogger';
@@ -2246,6 +2248,44 @@ export async function getMusicCacheStats(): Promise<MusicCacheStats> {
   }
 
   return { totalBytes, itemCount, totalFiles };
+}
+
+/**
+ * Re-read every downloaded song's file size from disk and correct `bytes`
+ * wherever it differs. One off-thread listing per album directory; a missing
+ * file or unreadable directory is skipped. Returns the number of rows corrected.
+ */
+export async function refreshCachedSongSizes(): Promise<number> {
+  const dir = ensureCacheDir();
+  const songsByDir = new Map<string, CachedSongMeta[]>();
+  for (const song of Object.values(musicCacheStore.getState().cachedSongs)) {
+    const albumId = song.albumId || UNKNOWN_ALBUM_ID;
+    const list = songsByDir.get(albumId);
+    if (list) list.push(song);
+    else songsByDir.set(albumId, [song]);
+  }
+
+  const updates: CachedSongBytesUpdate[] = [];
+  for (const [albumId, songs] of songsByDir) {
+    let sizes: Map<string, number>;
+    try {
+      // Serial: keeps native load flat across thousands of album directories.
+      // eslint-disable-next-line no-await-in-loop
+      const entries = await listDirectoryWithSizesAsync(new Directory(dir, albumId).uri);
+      sizes = new Map(entries.map((e) => [e.name, e.size]));
+    } catch {
+      continue;
+    }
+    for (const song of songs) {
+      const size = sizes.get(`${song.id}.${song.suffix}`);
+      if (size && size !== song.bytes) {
+        updates.push({ songId: song.id, bytes: size, prevBytes: song.bytes, suffix: song.suffix });
+      }
+    }
+  }
+
+  if (updates.length > 0) await musicCacheStore.getState().setCachedSongBytes(updates);
+  return updates.length;
 }
 
 /**

@@ -44,6 +44,7 @@ import {
   removeDownloadQueueItem,
   reorderCachedItemSongs,
   reorderDownloadQueue,
+  updateCachedSongBytes,
   updateDownloadQueueItem,
   upsertCachedItem,
   upsertCachedSong,
@@ -232,6 +233,35 @@ describe('cached_songs', () => {
     );
     expect(countCachedSongs()).toBe(2);
     expect(Object.keys(hydrateCachedSongs())).toEqual(['s1']);
+  });
+});
+
+describe('updateCachedSongBytes', () => {
+  it('sets bytes on matching rows and touches no other column', async () => {
+    await upsertCachedSong(makeSong({ bytes: 0 }));
+    await updateCachedSongBytes([{ songId: 's1', bytes: 4321, prevBytes: 0, suffix: 'mp3' }]);
+    expect(hydrateCachedSongs().s1).toEqual(makeSong({ bytes: 4321 }));
+  });
+
+  it('leaves a row whose bytes or suffix changed since the read', async () => {
+    await upsertCachedSong(makeSong({ id: 's1', bytes: 777 }));
+    await upsertCachedSong(makeSong({ id: 's2', bytes: 0, suffix: 'flac' }));
+    await updateCachedSongBytes([
+      { songId: 's1', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+      { songId: 's2', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+    ]);
+    const rows = hydrateCachedSongs();
+    expect(rows.s1.bytes).toBe(777);
+    expect(rows.s2.bytes).toBe(0);
+  });
+
+  it('is a no-op for an empty list or a missing db', async () => {
+    await upsertCachedSong(makeSong({ bytes: 0 }));
+    await updateCachedSongBytes([]);
+    __setDbForTests(null);
+    await updateCachedSongBytes([{ songId: 's1', bytes: 4321, prevBytes: 0, suffix: 'mp3' }]);
+    __setDbForTests(realDb);
+    expect(hydrateCachedSongs().s1.bytes).toBe(0);
   });
 });
 

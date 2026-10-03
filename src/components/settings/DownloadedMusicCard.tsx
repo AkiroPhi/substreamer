@@ -23,7 +23,7 @@ import {
   canDownloadFullLibrary,
   enqueueFullLibraryDownload,
 } from '../../services/fullLibraryDownloadService';
-import { clearQueuedDownloads } from '../../services/musicCacheService';
+import { clearQueuedDownloads, refreshCachedSongSizes } from '../../services/musicCacheService';
 import { refreshDownloadedMetadata } from '../../services/downloadedMetadataService';
 import { enqueueImageRefreshCycle } from '../../services/imageCacheService';
 import { refreshPlaylistLibrary } from '../../services/normalizedLibrarySync';
@@ -65,6 +65,8 @@ export function DownloadedMusicCard() {
   }, []);
 
   const handleRefreshDownloads = useCallback(() => {
+    // Local-only: re-read file sizes from disk, so it runs even when the server can't be reached.
+    fireAndForget(refreshCachedSongSizes(), 'settings.refreshDownloadedSizes');
     // The button stays enabled unless offline mode, but a refresh needs a reachable
     // server or every fetch stalls on a timeout. Both cases get the same message
     // rather than a doomed pass.

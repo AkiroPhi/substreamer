@@ -35,10 +35,12 @@ import {
   removeDownloadQueueItem,
   reorderCachedItemSongs as reorderCachedItemSongsRow,
   reorderDownloadQueue,
+  updateCachedSongBytes,
   updateDownloadQueueItem,
   upsertCachedItem as upsertCachedItemRow,
   upsertCachedSong as upsertCachedSongRow,
   type CachedItemRow,
+  type CachedSongBytesUpdate,
   type CachedSongRow,
   type DownloadQueueRow,
 } from './persistence/musicCacheTables';
@@ -209,6 +211,9 @@ export interface MusicCacheState {
    *  the only thing that rewrites the song's `cached_song_*` mirrors. */
   upsertCachedSong: (song: CachedSongMeta, child?: Child) => void;
   deleteCachedSong: (songId: string) => void;
+  /** Correct `bytes` from disk. Skips a song whose `bytes`/`suffix` changed
+   *  since the read. Leaves `totalBytes` alone — that is measured from disk. */
+  setCachedSongBytes: (updates: CachedSongBytesUpdate[]) => Promise<void>;
 
   /* Settings + aggregates */
   setMaxConcurrentDownloads: (n: MaxConcurrentDownloads) => void;
@@ -683,6 +688,20 @@ export const musicCacheStore = create<MusicCacheState>()((set, get) => ({
         },
       }),
     );
+  },
+
+  setCachedSongBytes: async (updates) => {
+    await updateCachedSongBytes(updates);
+    set((state) => {
+      let cachedSongs: Record<string, CachedSongMeta> | null = null;
+      for (const u of updates) {
+        const song = state.cachedSongs[u.songId];
+        if (!song || song.bytes !== u.prevBytes || song.suffix !== u.suffix) continue;
+        cachedSongs ??= { ...state.cachedSongs };
+        cachedSongs[u.songId] = { ...song, bytes: u.bytes };
+      }
+      return cachedSongs ? bumped(state, { cachedSongs }) : state;
+    });
   },
 
   deleteCachedSong: (songId) => {

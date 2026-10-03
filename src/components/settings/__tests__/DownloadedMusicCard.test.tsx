@@ -46,8 +46,10 @@ jest.mock('../../../services/fullLibraryDownloadService', () => ({
   enqueueFullLibraryDownload: jest.fn(),
 }));
 
+const mockRefreshCachedSongSizes = jest.fn(async () => 0);
 jest.mock('../../../services/musicCacheService', () => ({
   clearQueuedDownloads: jest.fn(),
+  refreshCachedSongSizes: () => mockRefreshCachedSongSizes(),
 }));
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -105,6 +107,7 @@ describe('DownloadedMusicCard refresh covers', () => {
 
 describe('DownloadedMusicCard refresh downloads', () => {
   beforeEach(() => {
+    mockRefreshCachedSongSizes.mockClear();
     mockRefreshDownloadedMetadata.mockClear();
     mockRefreshPlaylistLibrary.mockClear();
     mockAlert.mockClear();
@@ -120,6 +123,7 @@ describe('DownloadedMusicCard refresh downloads', () => {
     render(<DownloadedMusicCard />);
     fireEvent.press(screen.getByText('Refresh downloads'));
 
+    expect(mockRefreshCachedSongSizes).toHaveBeenCalledTimes(1);
     expect(mockRefreshDownloadedMetadata).toHaveBeenCalledWith({ mode: 'all' });
     expect(mockRefreshPlaylistLibrary).not.toHaveBeenCalled();
     finishDetail();
@@ -137,5 +141,7 @@ describe('DownloadedMusicCard refresh downloads', () => {
     );
     expect(mockRefreshDownloadedMetadata).not.toHaveBeenCalled();
     expect(mockRefreshPlaylistLibrary).not.toHaveBeenCalled();
+    // Size repair is local-only, so it still runs.
+    expect(mockRefreshCachedSongSizes).toHaveBeenCalledTimes(1);
   });
 });

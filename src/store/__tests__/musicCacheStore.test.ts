@@ -19,6 +19,7 @@ jest.mock('../persistence/musicCacheTables', () => ({
   upsertCachedItem: jest.fn(),
   deleteCachedItem: jest.fn(),
   upsertCachedSong: jest.fn(),
+  updateCachedSongBytes: jest.fn(async () => {}),
   deleteCachedSong: jest.fn(),
   removeCachedItemSong: jest.fn(),
   reorderCachedItemSongs: jest.fn(),
@@ -53,6 +54,7 @@ import {
   updateDownloadQueueItem,
   upsertCachedItem,
   upsertCachedSong,
+  updateCachedSongBytes,
   type CachedItemRow,
   type CachedSongRow,
   type DownloadQueueRow,
@@ -82,6 +84,7 @@ const mockUpsertCachedItem = upsertCachedItem as jest.Mock;
 const mockDeleteCachedItem = deleteCachedItem as jest.Mock;
 const mockUpsertCachedSong = upsertCachedSong as jest.Mock;
 const mockDeleteCachedSong = deleteCachedSong as jest.Mock;
+const mockUpdateCachedSongBytes = updateCachedSongBytes as jest.Mock;
 const mockRemoveCachedItemSong = removeCachedItemSong as jest.Mock;
 const mockReorderCachedItemSongs = reorderCachedItemSongs as jest.Mock;
 const mockOrphanSongIfUnreferencedAsync = orphanSongIfUnreferencedAsync as jest.Mock;
@@ -1125,6 +1128,40 @@ describe('upsertCachedSong', () => {
     musicCacheStore.setState({ cachedSongs: { s1: makeSong('s1', { bytes: 1 }) } });
     musicCacheStore.getState().upsertCachedSong(makeSong('s1', { bytes: 999 }));
     expect(musicCacheStore.getState().cachedSongs['s1'].bytes).toBe(999);
+  });
+});
+
+describe('setCachedSongBytes', () => {
+  it('writes to SQL, patches bytes and leaves totalBytes alone', async () => {
+    musicCacheStore.setState({ cachedSongs: { s1: makeSong('s1', { bytes: 0 }) }, totalBytes: 5000 });
+    const before = musicCacheStore.getState().revision;
+    const updates = [{ songId: 's1', bytes: 4321, prevBytes: 0, suffix: 'mp3' }];
+    await musicCacheStore.getState().setCachedSongBytes(updates);
+    expect(mockUpdateCachedSongBytes).toHaveBeenCalledWith(updates);
+    const state = musicCacheStore.getState();
+    expect(state.cachedSongs['s1']).toEqual(makeSong('s1', { bytes: 4321 }));
+    expect(state.totalBytes).toBe(5000);
+    expect(state.revision).toBe(before + 1);
+  });
+
+  it('skips songs changed since the read and unknown ids, without bumping', async () => {
+    musicCacheStore.setState({
+      cachedSongs: {
+        s1: makeSong('s1', { bytes: 777 }),
+        s2: makeSong('s2', { bytes: 0, suffix: 'flac' }),
+      },
+    });
+    const before = musicCacheStore.getState().revision;
+    await musicCacheStore.getState().setCachedSongBytes([
+      { songId: 's1', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+      { songId: 's2', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+      { songId: 'gone', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+    ]);
+    const state = musicCacheStore.getState();
+    expect(state.cachedSongs['s1'].bytes).toBe(777);
+    expect(state.cachedSongs['s2'].bytes).toBe(0);
+    expect(state.cachedSongs['gone']).toBeUndefined();
+    expect(state.revision).toBe(before);
   });
 });
 

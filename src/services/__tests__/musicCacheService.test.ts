@@ -5,6 +5,7 @@
 
 const mockListDirectoryAsync = jest.fn();
 const mockGetDirectorySizeAsync = jest.fn();
+const mockListDirectoryWithSizesAsync = jest.fn();
 const mockDownloadFileAsyncWithProgress = jest.fn();
 
 // Filesystem mock state
@@ -75,6 +76,7 @@ jest.mock('expo-file-system', () => {
 
 jest.mock('expo-async-fs', () => ({
   listDirectoryAsync: (...args: any[]) => mockListDirectoryAsync(...args),
+  listDirectoryWithSizesAsync: (...args: any[]) => mockListDirectoryWithSizesAsync(...args),
   getDirectorySizeAsync: (...args: any[]) => mockGetDirectorySizeAsync(...args),
   downloadFileAsyncWithProgress: (...args: any[]) => mockDownloadFileAsyncWithProgress(...args),
   deleteFileAsync: jest.fn(async (uri: string) => { fileDeletesAsync.push(uri); return true; }),
@@ -246,6 +248,7 @@ jest.mock('../../store/persistence/musicCacheTables', () => {
     }),
     // cached_songs writes
     upsertCachedSong: jest.fn(),
+    updateCachedSongBytes: jest.fn(async () => {}),
     deleteCachedSong: jest.fn(),
     // cached_items writes — stamp/clear derived-ness so the REAL-ref count and
     // orphan-pruning stay faithful (`derived: true` marks a partial grouping;
@@ -375,6 +378,7 @@ import {
   clearQueuedDownloads,
   clearMusicCache,
   getMusicCacheStats,
+  refreshCachedSongSizes,
   resumeIfSpaceAvailable,
   deleteStarredSongsDownload,
   retryDownload,
@@ -485,6 +489,7 @@ function seedSong(song: any) {
 
 beforeEach(() => {
   mockListDirectoryAsync.mockReset();
+  mockListDirectoryWithSizesAsync.mockReset();
   mockGetDirectorySizeAsync.mockReset();
   mockDownloadFileAsyncWithProgress.mockReset();
   mockFetchAlbum.mockReset();
@@ -2029,6 +2034,58 @@ describe('clearMusicCache', () => {
     mockGetDirectorySizeAsync.mockResolvedValue(0);
     await clearMusicCache();
     expect(getLocalTrackUri('s1')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  refreshCachedSongSizes                                             */
+/* ------------------------------------------------------------------ */
+
+describe('refreshCachedSongSizes', () => {
+  const entry = (name: string, size: number) => ({ name, size, isDirectory: false });
+
+  it('corrects rows whose stored size differs from disk and leaves the rest', async () => {
+    musicCacheStore.setState({
+      cachedSongs: {
+        s1: makeCachedSong('s1', { bytes: 0 }),
+        s2: makeCachedSong('s2', { bytes: 2000 }),
+        s3: makeCachedSong('s3', { bytes: 0, suffix: 'flac' }),
+        s4: makeCachedSong('s4', { bytes: 0, albumId: 'album-2' }),
+        s5: makeCachedSong('s5', { bytes: 0, albumId: '' }),
+      },
+      totalBytes: 99,
+    } as any);
+    mockListDirectoryWithSizesAsync.mockImplementation(async (uri: string) => {
+      if (uri.endsWith('/album-1')) {
+        return [entry('s1.mp3', 1234), entry('s2.mp3', 2000), entry('s3.mp3', 555), entry('s1.mp3.tmp', 9)];
+      }
+      if (uri.endsWith('/_unknown')) return [entry('s5.mp3', 4321)];
+      throw new Error('EACCES');
+    });
+
+    expect(await refreshCachedSongSizes()).toBe(2);
+
+    const songs = musicCacheStore.getState().cachedSongs;
+    expect(songs.s1.bytes).toBe(1234);
+    expect(songs.s2.bytes).toBe(2000);
+    expect(songs.s3.bytes).toBe(0); // only s3.mp3 on disk, not s3.flac
+    expect(songs.s4.bytes).toBe(0); // directory unreadable
+    expect(songs.s5.bytes).toBe(4321);
+    expect(musicCacheStore.getState().totalBytes).toBe(99);
+    expect(persistenceMock.updateCachedSongBytes).toHaveBeenCalledWith([
+      { songId: 's1', bytes: 1234, prevBytes: 0, suffix: 'mp3' },
+      { songId: 's5', bytes: 4321, prevBytes: 0, suffix: 'mp3' },
+    ]);
+    expect(mockListDirectoryWithSizesAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it('writes nothing when every size already matches', async () => {
+    musicCacheStore.setState({ cachedSongs: { s1: makeCachedSong('s1', { bytes: 1000 }) } } as any);
+    mockListDirectoryWithSizesAsync.mockResolvedValue([entry('s1.mp3', 1000)]);
+    persistenceMock.updateCachedSongBytes.mockClear();
+
+    expect(await refreshCachedSongSizes()).toBe(0);
+    expect(persistenceMock.updateCachedSongBytes).not.toHaveBeenCalled();
   });
 });
 

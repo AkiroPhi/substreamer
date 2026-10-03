@@ -1211,6 +1211,33 @@ export async function upsertCachedSong(song: CachedSongRow, child?: Child): Prom
   }
 }
 
+/** A file size read from disk, with the `bytes`/`suffix` it was compared against. */
+export interface CachedSongBytesUpdate {
+  songId: string;
+  bytes: number;
+  prevBytes: number;
+  suffix: string;
+}
+
+/**
+ * Write file sizes read from disk. Compare-and-set: a row whose `bytes` or
+ * `suffix` changed since the read (a redownload landed) is left alone.
+ */
+export async function updateCachedSongBytes(updates: CachedSongBytesUpdate[]): Promise<void> {
+  const db = getDb();
+  if (db === null || updates.length === 0) return;
+  try {
+    await db.runAtomicBatchAsync(
+      updates.map((u): BatchCommand => [
+        'UPDATE cached_songs SET bytes = ? WHERE song_id = ? AND bytes = ? AND suffix = ?;',
+        [u.bytes, u.songId, u.prevBytes, u.suffix],
+      ]),
+    );
+  } catch {
+    /* dropped */
+  }
+}
+
 export async function deleteCachedSong(songId: string): Promise<void> {
   const db = getDb();
   if (db === null) return;
