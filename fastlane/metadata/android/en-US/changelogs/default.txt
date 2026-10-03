@@ -1,1 +1,6 @@
-fix: downloaded album details lost after last update (hotfix)
+fix: performance on large libraries and playlists
+fix: queue shuffling
+fix: repeat 1 working properly
+fix: don't cache live streams / don't cache non music reponses
+fix: make less server requests
+fix: navidrome 0.64 ID migrations
