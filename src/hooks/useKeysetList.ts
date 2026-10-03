@@ -30,44 +30,51 @@ export function useKeysetList<T>(
   const cursorRef = useRef<Cursor | null>(null);
   const doneRef = useRef(false);
   const busyRef = useRef(false);
+  // Bumped on every restart. A load that lands after a restart writes nothing, so an
+  // earlier filter's page can't replace or append to the current one.
+  const genRef = useRef(0);
 
   const loadFirstPage = useCallback(async () => {
+    const gen = ++genRef.current;
+    cursorRef.current = null;
+    doneRef.current = false;
     busyRef.current = true;
     try {
       const page = await loadPage(null);
+      if (gen !== genRef.current) return;
       cursorRef.current = page.nextCursor;
       doneRef.current = !page.nextCursor;
       setRows(page.rows);
     } finally {
-      busyRef.current = false;
-      setInitialLoading(false);
+      if (gen === genRef.current) {
+        busyRef.current = false;
+        setInitialLoading(false);
+      }
     }
   }, [loadPage]);
 
   const loadMore = useCallback(() => {
     if (busyRef.current || doneRef.current) return;
+    const gen = genRef.current;
     busyRef.current = true;
     void (async () => {
       try {
         const page = await loadPage(cursorRef.current);
+        if (gen !== genRef.current) return;
         cursorRef.current = page.nextCursor;
         if (!page.nextCursor) doneRef.current = true;
         setRows((r) => [...r, ...page.rows]);
       } finally {
-        busyRef.current = false;
+        if (gen === genRef.current) busyRef.current = false;
       }
     })();
   }, [loadPage]);
 
   const reload = useCallback(() => {
-    cursorRef.current = null;
-    doneRef.current = false;
     void loadFirstPage();
   }, [loadFirstPage]);
 
   useEffect(() => {
-    cursorRef.current = null;
-    doneRef.current = false;
     setInitialLoading(true);
     void loadFirstPage();
   }, [loadFirstPage]);

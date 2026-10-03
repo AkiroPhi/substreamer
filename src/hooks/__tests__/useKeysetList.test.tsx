@@ -102,4 +102,64 @@ describe('useKeysetList', () => {
       resolve?.();
     });
   });
+  describe('a load that lands after a restart', () => {
+    /** Each call parks until the test resolves it, in any order. */
+    function deferredSource() {
+      const pending: Array<{ cursor: Cursor | null; resolve: (p: { rows: Row[]; nextCursor: Cursor | null }) => void }> = [];
+      const loadPage = (cursor: Cursor | null) =>
+        new Promise<{ rows: Row[]; nextCursor: Cursor | null }>((resolve) => {
+          pending.push({ cursor, resolve });
+        });
+      return { loadPage, pending };
+    }
+
+    it('drops a first page from the previous loadPage', async () => {
+      const first = deferredSource();
+      const second = deferredSource();
+      const { result, rerender } = renderHook(
+        ({ load }: { load: typeof first.loadPage }) => useKeysetList<Row>(load),
+        { initialProps: { load: first.loadPage } },
+      );
+      rerender({ load: second.loadPage });
+      await act(async () => {
+        second.pending[0].resolve({ rows: [{ id: 'new' }], nextCursor: null });
+      });
+      await act(async () => {
+        first.pending[0].resolve({ rows: [{ id: 'old' }], nextCursor: { sortKey: 0, id: 'old' } });
+      });
+      expect(result.current.rows.map((r) => r.id)).toEqual(['new']);
+      expect(result.current.initialLoading).toBe(false);
+      // The stale page's cursor did not leak: the new list is exhausted.
+      act(() => result.current.loadMore());
+      expect(second.pending).toHaveLength(1);
+    });
+
+    it('drops a loadMore page that lands after reload', async () => {
+      const src = deferredSource();
+      const { result } = renderHook(() => useKeysetList<Row>(src.loadPage));
+      await act(async () => {
+        src.pending[0].resolve({ rows: [{ id: 'a' }], nextCursor: { sortKey: 0, id: 'a' } });
+      });
+      act(() => result.current.loadMore());
+      expect(src.pending).toHaveLength(2);
+
+      act(() => result.current.reload());
+      await act(async () => {
+        src.pending[2].resolve({ rows: [{ id: 'r' }], nextCursor: { sortKey: 0, id: 'r' } });
+      });
+      await act(async () => {
+        src.pending[1].resolve({ rows: [{ id: 'stale' }], nextCursor: null });
+      });
+      expect(result.current.rows.map((r) => r.id)).toEqual(['r']);
+
+      // The stale loadMore neither marked the list done nor left it busy.
+      act(() => result.current.loadMore());
+      expect(src.pending).toHaveLength(4);
+      expect(src.pending[3].cursor).toEqual({ sortKey: 0, id: 'r' });
+      await act(async () => {
+        src.pending[3].resolve({ rows: [{ id: 's' }], nextCursor: null });
+      });
+      expect(result.current.rows.map((r) => r.id)).toEqual(['r', 's']);
+    });
+  });
 });
