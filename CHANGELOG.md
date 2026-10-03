@@ -1,5 +1,17 @@
 # Changelog
 
+## [8.1.5] - 2026-10-03
+
+- Update react-native-queue-player to 2.0.2
+- AGENTS.md: evidence before fixes, and existing settings first
+- Keep the playing track in the queue and fix its scrobble position
+- Page the full scrobble history and add a filter
+- Drop stale pages in useKeysetList after a restart
+- ci: update coverage badge [skip ci]
+- Refresh downloaded song sizes from disk on Refresh downloads
+- ci: update coverage badge [skip ci]
+- chore: release notes
+- ci: update coverage badge [skip ci]
 ## [8.1.4] - 2026-10-02
 
 - release: v8.1.3
