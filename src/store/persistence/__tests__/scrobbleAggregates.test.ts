@@ -10,8 +10,11 @@ import { getTopDecade } from '../../../services/tunedInService';
 import {
   computeScrobbleAnalytics,
   loadRecentScrobbles,
+  loadScrobblePage,
 } from '../scrobbleAggregates';
 import { backfillScrobbleColumnsAsync } from '../scrobbleTable';
+import { __setDbForTests } from '../db';
+import type { Cursor } from '../../../db/repository/core';
 import { deriveScrobbleColumns, scrobbleColumnValues, SCROBBLE_COLUMN_NAMES } from '../scrobbleColumns';
 import {
   createLegacyScrobbleTables,
@@ -184,4 +187,84 @@ it('loadRecentScrobbles returns newest first, bounded', async () => {
   insert('c', song('s3'), NOW + 2 * HOUR);
   const recent = await loadRecentScrobbles(2);
   expect(recent.map((r) => r.id)).toEqual(['c', 'b']); // newest first, limit 2
+});
+
+describe('loadScrobblePage', () => {
+  /** Page through everything with `limit`, collecting scrobble ids in order. */
+  const pageAll = async (limit: number, query?: string): Promise<string[]> => {
+    const out: string[] = [];
+    let cursor: Cursor | null = null;
+    for (let i = 0; i < 50; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      const page = await loadScrobblePage({ cursor, limit, query });
+      out.push(...page.rows.map((r) => r.id));
+      if (!page.nextCursor) return out;
+      cursor = page.nextCursor;
+    }
+    throw new Error('paging did not terminate');
+  };
+
+  it('pages the whole history newest first, each play exactly once, across tied times', async () => {
+    // Song ids sort OPPOSITE to scrobble ids, so ordering by the `song_id AS id` alias
+    // instead of the scrobble id would reorder the tied rows and break the cursor.
+    insert('e1', song('s9'), NOW);
+    insert('e2', song('s8'), NOW + HOUR);
+    insert('e3', song('s7'), NOW + HOUR);
+    insert('e4', song('s6'), NOW + HOUR);
+    insert('e5', song('s5'), NOW + 2 * HOUR);
+    expect(await pageAll(2)).toEqual(['e5', 'e4', 'e3', 'e2', 'e1']);
+    expect(await pageAll(1)).toEqual(['e5', 'e4', 'e3', 'e2', 'e1']);
+  });
+
+  it('returns a full page with a cursor, and a null cursor on the last page', async () => {
+    insert('e1', song('s1'), NOW);
+    insert('e2', song('s2'), NOW + HOUR);
+    const first = await loadScrobblePage({ cursor: null, limit: 2 });
+    expect(first.rows.map((r) => r.id)).toEqual(['e2', 'e1']);
+    expect(first.nextCursor).toBeNull();
+    const partial = await loadScrobblePage({ cursor: null, limit: 1 });
+    expect(partial.nextCursor).toEqual({ sortKey: NOW + HOUR, id: 'e2' });
+  });
+
+  it('filters on title OR artist, case-insensitively', async () => {
+    insert('e1', song('s1', { title: 'Blue Monday', artist: 'New Order' }), NOW);
+    insert('e2', song('s2', { title: 'Karma Police', artist: 'Radiohead' }), NOW + HOUR);
+    insert('e3', song('s3', { title: 'Ceremony', artist: 'New Order' }), NOW + 2 * HOUR);
+    expect(await pageAll(1, 'new order')).toEqual(['e3', 'e1']);
+    expect(await pageAll(1, '  POLICE ')).toEqual(['e2']);
+    expect(await pageAll(1, 'nothing matches')).toEqual([]);
+    expect(await pageAll(1, '   ')).toEqual(['e3', 'e2', 'e1']);
+  });
+
+  it('matches %, _ and backslash literally', async () => {
+    insert('e1', song('s1', { title: '100% Pure' }), NOW);
+    insert('e2', song('s2', { title: '100 Pure' }), NOW + HOUR);
+    insert('e3', song('s3', { title: 'a_b' }), NOW + 2 * HOUR);
+    insert('e4', song('s4', { title: 'axb' }), NOW + 3 * HOUR);
+    insert('e5', song('s5', { title: 'AC\\DC' }), NOW + 4 * HOUR);
+    expect(await pageAll(5, '100%')).toEqual(['e1']);
+    expect(await pageAll(5, 'a_b')).toEqual(['e3']);
+    expect(await pageAll(5, 'C\\D')).toEqual(['e5']);
+  });
+
+  it('excludes rows with no title or song id without shortening a page', async () => {
+    insert('e1', song('s1'), NOW);
+    insert('e2', song('s2'), NOW + HOUR);
+    insert('e3', song('s3'), NOW + 2 * HOUR);
+    db().runSync("UPDATE scrobble_events SET title = '' WHERE id = 'e3'");
+    db().runSync("UPDATE scrobble_events SET song_id = NULL WHERE id = 'e2'");
+    insert('e4', song('s4'), NOW + 3 * HOUR);
+    const page = await loadScrobblePage({ cursor: null, limit: 2 });
+    expect(page.rows.map((r) => r.id)).toEqual(['e4', 'e1']);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('returns an empty last page with no db, or when the query fails', async () => {
+    const real = db();
+    __setDbForTests(null);
+    expect(await loadScrobblePage({ cursor: null, limit: 5 })).toEqual({ rows: [], nextCursor: null });
+    __setDbForTests(real);
+    db().runSync('DROP TABLE scrobble_events');
+    expect(await loadScrobblePage({ cursor: null, limit: 5 })).toEqual({ rows: [], nextCursor: null });
+  });
 });

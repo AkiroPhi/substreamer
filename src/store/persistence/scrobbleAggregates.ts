@@ -15,6 +15,7 @@
  * (7d/30d/90d); `0` = all time.
  */
 import { getDb, type InternalDb } from './db';
+import type { Cursor } from '../../db/repository/core';
 import {
   rowToScrobble,
   SCROBBLE_SELECT,
@@ -229,6 +230,56 @@ export async function loadRecentScrobbles(limit: number): Promise<CompletedScrob
     return await scrobblesWithArrays(db, 'scrobble', rows);
   } catch {
     return [];
+  }
+}
+
+/** Escape `\`, `%` and `_` so they match literally under `LIKE … ESCAPE '\'`. */
+const escapeLike = (text: string): string => text.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/**
+ * One keyset page of the full history, newest first, for the history browser.
+ * `query` narrows to scrobbles whose title or artist contains it (ASCII
+ * case-insensitive). The id is qualified throughout: `SCROBBLE_SELECT` aliases
+ * `song_id AS id`, and a bare `id` in ORDER BY would sort by that alias.
+ */
+export async function loadScrobblePage(opts: {
+  cursor: Cursor | null;
+  limit: number;
+  query?: string;
+}): Promise<{ rows: CompletedScrobble[]; nextCursor: Cursor | null }> {
+  const db = getDb();
+  if (db === null) return { rows: [], nextCursor: null };
+  // Same validity rule `scrobblesWithArrays` applies, in SQL so a page is never short.
+  const clauses = [
+    "song_id IS NOT NULL AND song_id <> ''",
+    "title IS NOT NULL AND title <> ''",
+  ];
+  const params: (string | number)[] = [];
+  const query = opts.query?.trim();
+  if (query) {
+    const pattern = `%${escapeLike(query)}%`;
+    clauses.push("(title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\')");
+    params.push(pattern, pattern);
+  }
+  if (opts.cursor) {
+    clauses.push('(time, scrobble_events.id) < (?, ?)');
+    params.push(opts.cursor.sortKey, opts.cursor.id);
+  }
+  try {
+    const rows = await db.getAllAsync<ScrobbleSnapshotRow>(
+      `SELECT ${SCROBBLE_SELECT} FROM scrobble_events WHERE ${clauses.join(' AND ')}
+       ORDER BY time DESC, scrobble_events.id DESC LIMIT ?;`,
+      [...params, opts.limit + 1],
+    );
+    const hasMore = rows.length > opts.limit;
+    const page = hasMore ? rows.slice(0, opts.limit) : rows;
+    const last = page[page.length - 1];
+    return {
+      rows: await scrobblesWithArrays(db, 'scrobble', page),
+      nextCursor: hasMore ? { sortKey: last.time, id: last.scrobbleId } : null,
+    };
+  } catch {
+    return { rows: [], nextCursor: null };
   }
 }
 

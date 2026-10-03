@@ -16,8 +16,8 @@ export interface KeysetList<T> {
 
 /**
  * Forward-only keyset pagination for a SQL-backed list — no `loadPrevious`, no
- * `seekLetter`. Its caller, the Favourites tab, orders by "when you starred it", so it
- * has no alphabet scroller and never seeks or pages backward; the A–Z browse screens
+ * `seekLetter`. Its callers (Favourites, the scrobble history) order by time, so they
+ * have no alphabet scroller and never seek or page backward; the A–Z browse screens
  * keep their own richer loops.
  *
  * `loadPage` must be stable (a `useCallback`); it is the reload key.

@@ -1,17 +1,23 @@
 import { HeaderHeightContext } from "expo-router/react-navigation";
+import Ionicons from '@react-native-vector-icons/ionicons/static';
 import { FlashList } from '@shopify/flash-list';
-import { memo, useCallback, useContext, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { EmptyState as EmptyStateComponent } from '../components/EmptyState';
 import { GradientBackground } from '../components/GradientBackground';
 import { BottomChrome } from '../components/BottomChrome';
 import { SegmentControl } from '../components/SegmentControl';
+import { useKeysetList } from '../hooks/useKeysetList';
 import { useTheme } from '../hooks/useTheme';
-import { completedScrobbleStore, type CompletedScrobble } from '../store/completedScrobbleStore';
+import { type CompletedScrobble } from '../store/completedScrobbleStore';
 import { pendingScrobbleStore, type PendingScrobble } from '../store/pendingScrobbleStore';
+import { loadScrobblePage } from '../store/persistence/scrobbleAggregates';
+import { settingsStyles } from '../styles/settingsStyles';
 import { timeAgo } from '../utils/stringHelpers';
+
+import type { Cursor } from '../db/repository/core';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -27,6 +33,8 @@ const SEGMENT_KEYS = [
 ] as const;
 
 const ROW_HEIGHT = 56;
+const PAGE_SIZE = 100;
+const FILTER_DEBOUNCE_MS = 250;
 
 /* ------------------------------------------------------------------ */
 /*  ScrobbleRow                                                        */
@@ -63,8 +71,11 @@ const ScrobbleRow = memo(function ScrobbleRow({
 /*  Empty State                                                        */
 /* ------------------------------------------------------------------ */
 
-function ScrobbleEmptyState({ segment }: { segment: ScrobbleSegment }) {
+function ScrobbleEmptyState({ segment, filtered = false }: { segment: ScrobbleSegment; filtered?: boolean }) {
   const { t } = useTranslation();
+  if (filtered) {
+    return <EmptyStateComponent icon="search-outline" title={t('noScrobblesMatchFilter')} />;
+  }
   const icon = segment === 'completed' ? 'checkmark-done-outline' : 'time-outline';
   const message =
     segment === 'completed' ? t('noCompletedScrobblesYet') : t('noPendingScrobbles');
@@ -92,11 +103,25 @@ export function ScrobbleBrowserScreen() {
   );
 
   const pendingScrobbles = pendingScrobbleStore((s) => s.pendingScrobbles);
-  // Bounded NEWEST-FIRST recent slice (full history lives in SQL; analytics are
-  // SQL aggregates). The browser shows the most recent scrobbles.
-  const recentScrobbles = completedScrobbleStore((s) => s.recentScrobbles);
 
-  const completedReversed = recentScrobbles;
+  // The full completed history, paged from SQL newest first. A snapshot: it is read
+  // when the screen opens or the filter changes, not as new scrobbles land.
+  const [filterText, setFilterText] = useState('');
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(filterText.trim()), FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [filterText]);
+
+  const loadPage = useCallback(
+    (cursor: Cursor | null) => loadScrobblePage({ cursor, limit: PAGE_SIZE, query }),
+    [query],
+  );
+  const {
+    rows: completedRows,
+    initialLoading: completedLoading,
+    loadMore: loadMoreCompleted,
+  } = useKeysetList<CompletedScrobble>(loadPage);
 
   const pendingReversed = useMemo(
     () => [...pendingScrobbles].reverse(),
@@ -114,8 +139,15 @@ export function ScrobbleBrowserScreen() {
   );
 
   const completedEmpty = useCallback(
-    () => <ScrobbleEmptyState segment="completed" />,
-    [],
+    () =>
+      completedLoading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : (
+        <ScrobbleEmptyState segment="completed" filtered={query !== ''} />
+      ),
+    [completedLoading, query, colors.primary],
   );
 
   const pendingEmpty = useCallback(
@@ -123,15 +155,15 @@ export function ScrobbleBrowserScreen() {
     [],
   );
 
-  const segmentHeight = 52;
-  const contentInsetTop = headerHeight + segmentHeight;
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const contentInsetTop = headerHeight + chromeHeight;
 
   const completedContentContainerStyle = useMemo(
     () => ({
       paddingTop: contentInsetTop,
-      ...(completedReversed.length === 0 ? { flexGrow: 1 } : undefined),
+      ...(completedRows.length === 0 ? { flexGrow: 1 } : undefined),
     }),
-    [contentInsetTop, completedReversed.length],
+    [contentInsetTop, completedRows.length],
   );
   const pendingContentContainerStyle = useMemo(
     () => ({
@@ -146,11 +178,13 @@ export function ScrobbleBrowserScreen() {
       <View style={styles.content}>
         {activeSegment === 'completed' && (
           <FlashList
-            data={completedReversed}
+            data={completedRows}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
             ListEmptyComponent={completedEmpty}
             contentContainerStyle={completedContentContainerStyle}
+            onEndReached={loadMoreCompleted}
+            maintainVisibleContentPosition={{ disabled: true }}
           />
         )}
         {activeSegment === 'pending' && (
@@ -163,8 +197,28 @@ export function ScrobbleBrowserScreen() {
           />
         )}
       </View>
-      <View style={[styles.segmentOverlay, { top: headerHeight }]}>
+      <View
+        style={[styles.segmentOverlay, { top: headerHeight }]}
+        onLayout={(e) => setChromeHeight(e.nativeEvent.layout.height)}
+      >
         <SegmentControl segments={segments} selected={activeSegment} onSelect={setActiveSegment} />
+        {activeSegment === 'completed' && (
+          <View style={styles.filterWrap}>
+            <View style={[settingsStyles.filterPill, { backgroundColor: colors.inputBg }]}>
+              <Ionicons name="search" size={18} color={colors.textSecondary} style={settingsStyles.filterIcon} />
+              <TextInput
+                style={[settingsStyles.filterInput, { color: colors.textPrimary }]}
+                placeholder={t('filterPlaceholder')}
+                placeholderTextColor={colors.textSecondary}
+                value={filterText}
+                onChangeText={setFilterText}
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+              />
+            </View>
+          </View>
+        )}
       </View>
       <BottomChrome withSafeAreaPadding />
     </GradientBackground>
@@ -187,6 +241,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 1,
+  },
+  filterWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   row: {
     flexDirection: 'row',

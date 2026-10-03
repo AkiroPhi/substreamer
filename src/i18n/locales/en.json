@@ -903,6 +903,7 @@
   "monthsAgo": "{{count}}mo ago",
   "yearsAgo": "{{count}}y ago",
   "noCompletedScrobblesYet": "No completed scrobbles yet",
+  "noScrobblesMatchFilter": "No scrobbles match your filter",
   "noPendingScrobbles": "No pending scrobbles",
   "scrobblesAppearAfterPlaying": "Scrobbles will appear here after tracks finish playing",
   "pendingScrobblesSentAutomatically": "Pending scrobbles are sent to your server automatically",
