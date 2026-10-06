@@ -62,6 +62,8 @@ jest.mock('../../db/repository/details', () => ({
 jest.mock('../../store/persistence/db', () => ({
   getDb: () => ({}),
 }));
+// Stores persisting through kvStorage (ratings) need a working adapter, not the stub DB.
+jest.mock('../../store/persistence/kvStorage', () => require('../../store/persistence/__mocks__/kvStorage'));
 
 // The success path upserts into the normalized model; these tests are about which
 // SOURCE wins, so stub the writes rather than standing up a real DB.

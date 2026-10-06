@@ -107,11 +107,16 @@ jest.mock('../../store/migrationStore', () => ({
 
 let mockSqliteGetItem: () => string | null = () => null;
 
-jest.mock('../../store/persistence/kvStorage', () => ({
-  kvStorage: {
+// Both adapters, with writes, so the stores the splash rehydrates can persist; reads are
+// whatever the test seeds.
+jest.mock('../../store/persistence/kvStorage', () => {
+  const adapter = {
     getItem: () => mockSqliteGetItem(),
-  },
-}));
+    setItem: () => {},
+    removeItem: () => {},
+  };
+  return { kvStorage: adapter, kvStorageSync: adapter };
+});
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AnimatedSplashScreen = require('../AnimatedSplashScreen').default;
