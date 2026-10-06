@@ -96,9 +96,8 @@ const CACHED_ALBUM_FIELDS: readonly CachedAlbumField[] = [
  * everywhere else. Preferring `albums.cover_art` keys off the value the rest of the app
  * already uses, so it is a cache HIT rather than a second download of the same picture.
  *
- * This is the indirection `coverArtForSong` already does for songs, which is why the
- * offline Songs tab was right while the Albums tab was not. The fallback keeps a download
- * renderable when its library row is absent — offline before the first sync.
+ * The cover resolver applies the same rule to songs in album mode. The fallback keeps a
+ * download renderable when its library row is absent — offline before the first sync.
  */
 const CACHED_ALBUM_COLS = [
   'ca."item_id" AS "id"',

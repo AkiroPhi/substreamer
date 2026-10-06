@@ -287,7 +287,7 @@ describe('childFromSnapshotRow', () => {
     expect(back.starred?.getTime()).toBe(STARRED.getTime());
   });
 
-  it('restores the fields `resolveSongCoverArt` and the details modal read', () => {
+  it('restores the fields the cover resolver and the details modal read', () => {
     const back = childFromSnapshotRow(rowFor(richChild), richArrays);
     expect(back.albumId).toBe('al-1');
     expect(back.suffix).toBe('flac');

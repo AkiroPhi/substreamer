@@ -92,9 +92,8 @@ jest.mock('../../hooks/useTransitionComplete', () => ({ useTransitionComplete: (
 jest.mock('../../hooks/useDownloadStatus', () => ({ useDownloadStatus: () => 'none' }));
 jest.mock('../../hooks/useLayoutMode', () => ({ useLayoutMode: () => 'compact' }));
 jest.mock('../../hooks/useRefreshControlKey', () => ({ useRefreshControlKey: () => 0 }));
-jest.mock('../../hooks/useSongCoverArt', () => ({
-  useSongCoverArt: () => undefined,
-  resolveEntityCoverArt: () => undefined,
+jest.mock('../../services/imageCacheService', () => ({
+  resolveCoverArtId: jest.fn(async () => undefined),
 }));
 
 jest.mock('../../components/CachedImage', () => {

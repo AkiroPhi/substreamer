@@ -57,7 +57,6 @@ jest.mock('../RowMetaLine', () => {
       durationText ? <Text>{durationText}</Text> : null,
   };
 });
-jest.mock('../../hooks/useSongCoverArt', () => ({ useSongCoverArt: () => 'cover-1' }));
 jest.mock('../../hooks/useRating', () => ({ useRating: () => 0 }));
 const mockStarred = { value: false };
 jest.mock('../../hooks/useIsStarred', () => ({ useIsStarred: () => mockStarred.value }));

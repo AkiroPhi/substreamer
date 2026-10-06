@@ -34,10 +34,6 @@ jest.mock('@/hooks/useCoverGradient', () => ({
   }),
 }));
 
-jest.mock('@/hooks/useSongCoverArt', () => ({
-  useSongCoverArt: () => 'cover-1',
-}));
-
 jest.mock('@/hooks/usePlaybackState', () => ({
   usePlaybackState: () => ({ isPlaying: true, isBuffering: false }),
 }));

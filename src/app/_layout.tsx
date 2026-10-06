@@ -69,7 +69,6 @@ import { runDataModelUpgradeIfNeeded } from '../services/dataModelUpgradeService
 import { runLegacyColumnDropIfNeeded } from '../services/legacyColumnDropService';
 import { runLibraryReapIfNeeded } from '../services/libraryReapService';
 import { runSortKeyRebuildIfNeeded } from '../services/sortKeyRebuildService';
-import { hydrateDownloadedAlbumCoverArt } from '../hooks/useSongCoverArt';
 import { useLibrarySyncBackgroundNotification } from '../hooks/useLibrarySyncBackgroundNotification';
 import { useLibrarySyncKeepAwake } from '../hooks/useLibrarySyncKeepAwake';
 import { useMigrationGateBackgroundNotification } from '../hooks/useMigrationGateBackgroundNotification';
@@ -241,12 +240,6 @@ async function runDeferredStartup(getCancelled: () => boolean): Promise<void> {
   await stage('deferredImageCacheInit', () => deferredImageCacheInit());
   if (getCancelled()) return;
   await stage('deferredMusicCacheInit', () => deferredMusicCacheInit());
-  if (getCancelled()) return;
-
-  // Warm the album cover-art cache for DOWNLOADED albums (after music-cache hydration)
-  // so offline imperative callers (lock-screen art, CarPlay snapshot) resolve album-mode
-  // cover art without a live DB round-trip. Bounded; on-demand fill covers everything else.
-  idleStage('hydrateDownloadedAlbumCoverArt', () => hydrateDownloadedAlbumCoverArt());
   if (getCancelled()) return;
 
   // Settings-only "used space" total from a full recursive cache-dir walk — defer to

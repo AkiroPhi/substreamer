@@ -37,7 +37,6 @@ import {
   upsertSongs,
 } from '@/db/repository/songs';
 import { getDb } from '@/store/persistence/db';
-import { clearAlbumCoverArtCache } from '@/hooks/useSongCoverArt';
 import { offlineModeStore } from '@/store/offlineModeStore';
 import { ratingStore } from '@/store/ratingStore';
 import { serverInfoStore } from '@/store/serverInfoStore';
@@ -821,10 +820,6 @@ async function doNormalizedSync(
     // song-phase bail below returns before them, so an interrupted sync would otherwise
     // leave thousands of new albums invisible to CarPlay.
     syncStatusStore.getState().bumpLibraryUpdated();
-    // A resync can change album cover-art tokens — drop the bounded cover-art cache so
-    // the next lookups re-read the fresh `albums.cover_art` (the cache is otherwise
-    // populated on-demand and never self-invalidates).
-    clearAlbumCoverArtCache();
     const albumMs = nowMs() - tAlbum0;
     const totalAlbums = await countAlbums(db);
 
