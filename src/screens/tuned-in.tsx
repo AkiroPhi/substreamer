@@ -254,7 +254,7 @@ const HeroMixCard = memo(function HeroMixCard({
 /*  MediumMixCard                                                      */
 /* ------------------------------------------------------------------ */
 
-const MediumMixCard = memo(function MediumMixCard({
+export const MediumMixCard = memo(function MediumMixCard({
   mix,
   index,
   fillHeight = false,
@@ -268,7 +268,7 @@ const MediumMixCard = memo(function MediumMixCard({
     useMixCardPlayback(mix, index);
 
   return (
-    <MixCardEntrance index={index}>
+    <MixCardEntrance index={index} style={styles.mediumFlex}>
     <Animated.View style={[styles.mediumFlex, animatedStyle]}>
       <Pressable
         onPress={handlePress}
