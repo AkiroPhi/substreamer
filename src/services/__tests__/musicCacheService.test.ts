@@ -3196,6 +3196,7 @@ describe('reconcileMusicCacheAsync', () => {
   });
 
   it('deletes orphan top-level directory whose name is not a known album_id', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Seed at least one valid song so validAlbumIds is non-empty (the
     // safety gate that prevents a pre-migration fresh-install / halted-
     // migration state from wiping v1 layout directories).
@@ -3212,6 +3213,9 @@ describe('reconcileMusicCacheAsync', () => {
 
     expect(dirDeletes.some((u) => u.endsWith('a-mystery'))).toBe(true);
     expect(dirDeletes.some((u) => u.endsWith('a-known'))).toBe(false);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('skips the stale-dir sweep when validAlbumIds is empty (pre-migration safety gate)', async () => {
@@ -3230,6 +3234,7 @@ describe('reconcileMusicCacheAsync', () => {
   });
 
   it('deletes stale top-level directory whose name is not a known album_id', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Song s1 is in SQL under album 'a1'. A leftover directory 'a2' exists
     // on disk but is not a valid album_id — it gets swept in pass 4.
     seedSong(makeCachedSong('s1', { albumId: 'a1', suffix: 'mp3' }));
@@ -3249,9 +3254,13 @@ describe('reconcileMusicCacheAsync', () => {
     // a1 is valid and stays untouched.
     expect(dirDeletes.some((u) => u.endsWith('a2'))).toBe(true);
     expect(dirDeletes.some((u) => u.endsWith('a1'))).toBe(false);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('deletes stale .tmp files unconditionally inside a valid album dir', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Seed a cached song so the 'a1' album is in validAlbumIds, triggering
     // the per-file pass 1 walk (where stale .tmp files are reaped).
     seedSong(makeCachedSong('s1', { albumId: 'a1', suffix: 'mp3' }));
@@ -3267,9 +3276,13 @@ describe('reconcileMusicCacheAsync', () => {
     // .tmp/orphan deletes now go off-thread via deleteFileAsync.
     expect(fileDeletesAsync.some((u) => u.endsWith('abandoned.mp3.tmp'))).toBe(true);
     expect(fileDeletesAsync.some((u) => u.endsWith('another.flac.tmp'))).toBe(true);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('removes an empty album directory with no SQL songs referencing it', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Seed a valid song so validAlbumIds is non-empty (passes the safety
     // gate). A separate 'orphan-album' dir exists on disk with nothing
     // in SQL referencing it → pass 4 sweeps it.
@@ -3287,6 +3300,9 @@ describe('reconcileMusicCacheAsync', () => {
 
     expect(dirDeletes.some((u) => u.includes('orphan-album'))).toBe(true);
     expect(dirDeletes.some((u) => u.endsWith('a-known'))).toBe(false);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('keeps album directory when an SQL song still references its albumId', async () => {
@@ -3337,6 +3353,7 @@ describe('reconcileMusicCacheAsync', () => {
   });
 
   it('removes missing-file edges across multiple referencing items', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     seedSong(makeCachedSong('shared', { albumId: 'a', suffix: 'mp3' }));
     seedSong(makeCachedSong('keeper', { albumId: 'a', suffix: 'mp3' }));
     seedItem('album-a', { type: 'album', songIds: ['shared', 'keeper'] });
@@ -3362,9 +3379,13 @@ describe('reconcileMusicCacheAsync', () => {
 
     // pl-1 had ONLY the missing song -> orphan item -> removed.
     expect(musicCacheStore.getState().cachedItems['pl-1']).toBeUndefined();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('removes orphan item rows with zero songIds', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Item has no edges from the start — simulates a leftover row.
     seedItem('empty-item', { type: 'playlist', songIds: [] });
     mockListDirectoryAsync.mockImplementation(async () => []);
@@ -3372,6 +3393,9 @@ describe('reconcileMusicCacheAsync', () => {
     await reconcileMusicCacheAsync();
 
     expect(musicCacheStore.getState().cachedItems['empty-item']).toBeUndefined();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('reconciliation healed drift'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('swallows listDirectoryAsync errors at the top level', async () => {

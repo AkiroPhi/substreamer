@@ -97,11 +97,14 @@ describe('processingOverlayStore', () => {
     expect(processingOverlayStore.getState().label).toBe('B');
   });
 
-  it('watchdog force-hides a hung processing state', () => {
+  it('watchdog force-hides a hung processing state, and says so', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     processingOverlayStore.getState().show('Working...');
     // Never resolves — no showSuccess/showError.
     jest.advanceTimersByTime(60000);
     expect(processingOverlayStore.getState().status).toBe('idle');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[processingOverlay] watchdog force-hide'));
+    warn.mockRestore();
   });
 
   it('watchdog is cancelled once the op resolves', () => {

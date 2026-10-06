@@ -228,14 +228,20 @@ describe('resetAllStores', () => {
       .mockImplementation(() => {
         throw new Error('cannot start a transaction within a transaction');
       });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     playerStore.setState({ currentTrack: { id: 'track-1' } as any });
 
     await expect(resetAllStores()).resolves.toBeUndefined();
 
+    expect(warn).toHaveBeenCalledWith(
+      '[resetAllStores] normalized schema reset failed:',
+      expect.objectContaining({ message: 'cannot start a transaction within a transaction' }),
+    );
     expect(clearScrobbles).toHaveBeenCalledTimes(1);
     expect(clearAllMusicCacheRows).toHaveBeenCalledTimes(1);
     expect(playerStore.getState().currentTrack).toBeNull();
     withTransactionSync.mockRestore();
+    warn.mockRestore();
   });
 
   it('leaves the processing overlay alone — logout runs behind it', async () => {

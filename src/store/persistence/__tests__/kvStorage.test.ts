@@ -72,7 +72,10 @@ describe('kvStorageSync (happy path)', () => {
       mockRunSync.mockImplementation(() => {
         throw new Error('disk full');
       });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       expect(() => kvStorageSync.setItem('any', 'v')).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[kvStorage] setItem FAILED key=any'));
+      warn.mockRestore();
     });
   });
 
@@ -89,7 +92,10 @@ describe('kvStorageSync (happy path)', () => {
       mockRunSync.mockImplementation(() => {
         throw new Error('disk i/o');
       });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       expect(() => kvStorageSync.removeItem('any')).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[kvStorage] removeItem FAILED key=any'));
+      warn.mockRestore();
     });
   });
 
@@ -163,7 +169,10 @@ describe('kvStorage (async, happy path)', () => {
 
     it('swallows runAsync failures', async () => {
       mockRunAsync.mockRejectedValue(new Error('disk full'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       await expect(kvStorage.setItem('any', 'v')).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[kvStorage] setItem FAILED key=any'));
+      warn.mockRestore();
     });
   });
 
@@ -178,7 +187,10 @@ describe('kvStorage (async, happy path)', () => {
 
     it('swallows runAsync failures', async () => {
       mockRunAsync.mockRejectedValue(new Error('disk i/o'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       await expect(kvStorage.removeItem('any')).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[kvStorage] removeItem FAILED key=any'));
+      warn.mockRestore();
     });
   });
 });
@@ -189,8 +201,11 @@ describe('kvStorage adapters (db unavailable → in-memory fallback)', () => {
     kvFallback.clear();
   });
 
-  it('sync adapter round-trips values via the kvFallback Map', () => {
+  it('sync adapter round-trips values via the kvFallback Map, warning once that writes are ephemeral', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     kvStorageSync.setItem('alpha', 'one');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[kvStorage] SQLite unavailable'));
+    warn.mockRestore();
     kvStorageSync.setItem('beta', 'two');
     expect(kvStorageSync.getItem('alpha')).toBe('one');
     expect(kvStorageSync.getItem('beta')).toBe('two');

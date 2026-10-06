@@ -383,6 +383,7 @@ describe('song-gap repair', () => {
 
 describe('the per-album walk', () => {
   it('runs the albumId sanity check on the first page of a RESUMED walk', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // A server that stops populating `albumId` part-way writes rows with album_id NULL:
     // the album reads empty while countSongs stays right, so nothing downstream sees it.
     // Gating the check on offset 0 meant a resumed walk never looked.
@@ -399,6 +400,9 @@ describe('the per-album walk', () => {
 
     expect(syncStatusStore.getState().songSyncStrategy).toBe('basic');
     expect(mockGetAlbum).toHaveBeenCalled();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('songs missing albumId'))).toBe(true);
+    warn.mockRestore();
   });
 
   /** The persisted strategy is what routes the run; on a basic server the probe has

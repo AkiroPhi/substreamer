@@ -775,6 +775,7 @@ describe('prefetchCoverArt — keys off the coverArt value, not the entity ID', 
 
 describe('downloadSourceImage — response.ok === false', () => {
   it('returns null and does not create files when server returns non-ok', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const id = 'not-ok';
 
     mockFetch.mockResolvedValueOnce({
@@ -786,6 +787,9 @@ describe('downloadSourceImage — response.ok === false', () => {
 
     // addFile should not have been called (no successful download)
     expect(mockUpsertCachedImage).not.toHaveBeenCalled();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('for coverArt=not-ok'))).toBe(true);
+    warn.mockRestore();
   });
 });
 
@@ -825,6 +829,7 @@ describe('generateResizedVariant — success and catch paths', () => {
   });
 
   it('continues processing when resize throws an error', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const id = 'resize-fail';
 
     // Pre-set 600px source as cached
@@ -836,6 +841,9 @@ describe('generateResizedVariant — success and catch paths', () => {
     mockResizeImageToFileAsync.mockRejectedValue(new Error('Resize crash'));
 
     await expect(ensureCached(id)).resolves.toBeUndefined();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('3 consecutive resize failures for coverArt=resize-fail'))).toBe(true);
+    warn.mockRestore();
   });
 });
 
@@ -1045,6 +1053,7 @@ describe('generateResizedVariant — dest.exists before rename (line 445)', () =
 
 describe('generateResizedVariant — catch with existing tmp (line 454)', () => {
   it('deletes .tmp file when resize fails and tmp exists on disk', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const id = 'resize-catch-tmp';
 
     mockDirExistsMap.set(subDirName(id), true);
@@ -1061,11 +1070,15 @@ describe('generateResizedVariant — catch with existing tmp (line 454)', () => 
     });
 
     await expect(ensureCached(id)).resolves.toBeUndefined();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('3 consecutive resize failures for coverArt=resize-catch-tmp'))).toBe(true);
+    warn.mockRestore();
   });
 });
 
 describe('generateResizedVariant — 3-failure circuit breaker purges row', () => {
   it('purges the cover after three consecutive resize failures', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const id = 'repeat-fail';
 
     mockDirExistsMap.set(subDirName(id), true);
@@ -1083,6 +1096,9 @@ describe('generateResizedVariant — 3-failure circuit breaker purges row', () =
     expect(mockDeleteCachedImagesForCoverArt).toHaveBeenCalledWith(id);
     expect(mockDbRows.has(mockDbKey(id, 600))).toBe(false);
     expect(mockFileExistsMap.get(fileMockName(id, '600.jpg'))).toBeFalsy();
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('3 consecutive resize failures for coverArt=repeat-fail'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('does not purge when failures stay below the threshold', async () => {
@@ -1568,6 +1584,7 @@ describe('sentinel cover-art IDs — sweep + guards', () => {
 
 describe('downloadSourceImage — connectivity-gated purge', () => {
   it('purges cache rows immediately when the server returns 404', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     seedDbRow({ coverArtId: 'dead-album', size: 50 });
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -1580,9 +1597,13 @@ describe('downloadSourceImage — connectivity-gated purge', () => {
 
     expect(mockDeleteCachedImagesForCoverArt).toHaveBeenCalledWith('dead-album');
     expect(mockDbRows.has(mockDbKey('dead-album', 50))).toBe(false);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('404 for coverArt=dead-album'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('purges 404 even when connectivity store says server is unreachable', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // 404 is unambiguous — we got a definitive server response that this
     // cover does not exist. The connectivity-store gate doesn't apply.
     setConnectivity({ isServerReachable: false });
@@ -1597,9 +1618,13 @@ describe('downloadSourceImage — connectivity-gated purge', () => {
     await ensureCached('dead-album');
 
     expect(mockDeleteCachedImagesForCoverArt).toHaveBeenCalledWith('dead-album');
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('404 for coverArt=dead-album'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('purges immediately on a non-404 HTTP error when connectivity is healthy', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     seedDbRow({ coverArtId: 'flaky-album', size: 50 });
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -1612,6 +1637,9 @@ describe('downloadSourceImage — connectivity-gated purge', () => {
 
     expect(mockDeleteCachedImagesForCoverArt).toHaveBeenCalledWith('flaky-album');
     expect(mockDbRows.has(mockDbKey('flaky-album', 50))).toBe(false);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('HTTP 500 for coverArt=flaky-album'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('preserves the row on non-404 HTTP error when offline mode is on', async () => {
@@ -1732,6 +1760,7 @@ describe('repairIncompleteImages — outcome counts', () => {
   });
 
   it('counts a 404 as removed, not failed', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     seedDbRow({ coverArtId: 'album-404', size: 50 });
     mockFetch.mockResolvedValue({
       ok: false,
@@ -1746,9 +1775,13 @@ describe('repairIncompleteImages — outcome counts', () => {
     expect(outcome.removed).toBe(1);
     expect(outcome.repaired).toBe(0);
     expect(outcome.failed).toBe(0);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('404 for coverArt=album-404'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('counts a non-404 server error as removed when connectivity is healthy', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Under the connectivity-gated model a 500 with healthy connectivity
     // purges immediately — no 3-strikes leniency. The row goes from
     // incomplete → gone, classified `removed` not `failed`.
@@ -1766,6 +1799,9 @@ describe('repairIncompleteImages — outcome counts', () => {
     expect(outcome.removed).toBe(1);
     expect(outcome.failed).toBe(0);
     expect(outcome.repaired).toBe(0);
+    // The failure this test drives is reported, not swallowed.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('HTTP 500 for coverArt=album-flaky'))).toBe(true);
+    warn.mockRestore();
   });
 
   it('counts a non-404 server error as failed when connectivity is down', async () => {
