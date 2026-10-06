@@ -171,8 +171,8 @@ jest.mock('../connectivityService', () => ({
   awaitFirstPing: () => mockAwaitFirstPing(),
 }));
 
-// `triggerCoverArtRecache` lazy-requires `hydrateCachedItems` AND
-// `hydrateCachedSongs` to read the downloaded album/playlist set plus
+// `triggerCoverArtRecache` reads `hydrateCachedItems` AND
+// `hydrateCachedSongs` for the downloaded album/playlist set plus
 // per-song cover art (needed for songs inside downloaded playlists
 // whose source albums weren't downloaded). Mocked so the recache suite
 // can control what the worker sees without dragging in the music-cache
@@ -255,7 +255,7 @@ const mockFindIncompleteCovers = jest.fn(() => {
   for (const row of mockDbRows.values()) byCover.set(row.coverArtId, (byCover.get(row.coverArtId) ?? 0) + 1);
   return [...byCover.entries()].filter(([, n]) => n < 4).map(([id]) => id);
 });
-const mockHydrateImageCacheAggregates = jest.fn(() => {
+function mockAggregatesFromRows() {
   let totalBytes = 0;
   const covers = new Set<string>();
   const byCover = new Map<string, number>();
@@ -267,7 +267,8 @@ const mockHydrateImageCacheAggregates = jest.fn(() => {
   let incompleteCount = 0;
   for (const n of byCover.values()) if (n < 4) incompleteCount++;
   return { totalBytes, fileCount: mockDbRows.size, imageCount: covers.size, incompleteCount };
-});
+}
+const mockHydrateImageCacheAggregates = jest.fn(mockAggregatesFromRows);
 const mockListCachedImagesForBrowser = jest.fn((filter: 'all' | 'complete' | 'incomplete' = 'all') => {
   const byCover = new Map<string, CacheDbRow[]>();
   for (const row of mockDbRows.values()) {
@@ -397,6 +398,10 @@ function fileMockName(coverArtId: string, fileName: string): string {
   return `file://${subDirName(coverArtId)}/${fileName}`;
 }
 
+// A finished cover download arms the 750ms aggregate-recalc debounce; let it fire so the
+// worker can exit instead of being force-killed.
+afterAll(() => new Promise((resolve) => setTimeout(resolve, 800)));
+
 beforeEach(() => {
   mockFileExistsMap.clear();
   mockDirExistsMap.clear();
@@ -415,7 +420,7 @@ beforeEach(() => {
   mockClearAllCachedImages.mockClear();
   mockHasCachedImage.mockClear();
   mockFindIncompleteCovers.mockClear();
-  mockHydrateImageCacheAggregates.mockClear();
+  mockHydrateImageCacheAggregates.mockReset().mockImplementation(mockAggregatesFromRows);
   mockListCachedImagesForBrowser.mockClear();
   mockBulkInsertCachedImages.mockClear();
   mockRecalculateFromDb.mockClear();
@@ -1929,14 +1934,6 @@ describe('reconcileImageCache — row drop on missing file', () => {
 });
 
 describe('reconcileImageCache — encoded directory names vs SQL ids', () => {
-  beforeEach(() => {
-    // Explicit: a leaked non-zero fileCount from another suite would trip the
-    // snapshot-disagreement abort before any of these assertions are reached.
-    mockHydrateImageCacheAggregates.mockReturnValue({
-      totalBytes: 0, fileCount: 0, imageCount: 0, incompleteCount: 0,
-    });
-  });
-
   // Disc-cover ids carry a colon, which `coverArtPathKey` escapes for the path
   // while the SQL row keeps the original. Pass 1 must map the directory BACK to
   // the id; treating the directory name as the id misses every lookup.
@@ -2002,14 +1999,6 @@ describe('reconcileImageCache — encoded directory names vs SQL ids', () => {
 });
 
 describe('reconcileImageCache — snapshot trust', () => {
-  beforeEach(() => {
-    // Explicit: a leaked non-zero fileCount from another suite would trip the
-    // snapshot-disagreement abort before any of these assertions are reached.
-    mockHydrateImageCacheAggregates.mockReturnValue({
-      totalBytes: 0, fileCount: 0, imageCount: 0, incompleteCount: 0,
-    });
-  });
-
   function seedOneUnrowedFile(): void {
     mockListDirectoryAsync.mockImplementation(async (uri: string) => {
       if (uri.endsWith('image-cache')) return ['album1'];
