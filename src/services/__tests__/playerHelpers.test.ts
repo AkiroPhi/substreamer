@@ -1,4 +1,6 @@
 jest.mock('react-native', () => ({
+  // expo-modules-core looks optional native modules up here when expo-file-system loads.
+  TurboModuleRegistry: { get: () => null },
   Platform: { OS: 'android' },
 }));
 

@@ -21,6 +21,8 @@ let mockAppStateCallback: ((state: string) => void) | null = null;
 const mockAppStateRemove = jest.fn();
 
 jest.mock('react-native', () => ({
+  // expo-modules-core looks optional native modules up here when expo-file-system loads.
+  TurboModuleRegistry: { get: () => null },
   AppState: {
     addEventListener: jest.fn((event: string, cb: (state: string) => void) => {
       if (event === 'change') mockAppStateCallback = cb;

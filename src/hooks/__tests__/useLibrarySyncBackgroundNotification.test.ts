@@ -22,6 +22,8 @@ const mockAppStateAdd = jest.fn((_event: string, cb: (state: string) => void) =>
 });
 
 jest.mock('react-native', () => ({
+  // expo-modules-core looks optional native modules up here when expo-file-system loads.
+  TurboModuleRegistry: { get: () => null },
   AppState: { addEventListener: (...a: any[]) => (mockAppStateAdd as any)(...a) },
   Platform: { OS: 'android' },
 }));

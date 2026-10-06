@@ -12,6 +12,8 @@
  * Per AGENTS.md §11 the SQLite substitute proves SQL semantics, never concurrency.
  */
 jest.mock('react-native', () => ({
+  // expo-modules-core looks optional native modules up here when expo-file-system loads.
+  TurboModuleRegistry: { get: () => null },
   AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
   Platform: { OS: 'android' },
 }));
