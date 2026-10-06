@@ -14,11 +14,10 @@ import { imageCacheDiagnosticsStore } from '../store/imageCacheDiagnosticsStore'
 import { playbackSettingsStore, type RepeatModeSetting } from '../store/playbackSettingsStore';
 import { type PlaybackStatus } from '../store/playerStore';
 import { resolveEffectiveFormat } from '../utils/effectiveFormat';
-import { resolveSongCoverArt } from '../hooks/useSongCoverArt';
-import { resolveCachedImageUri } from './imageCacheService';
+import { resolveDisplayImages } from './imageCacheService';
 import { logImageCache } from './imageCacheLogger';
 import { getLocalTrackUri } from './musicCacheService';
-import { getCoverArtUrl, getStreamUrl, type Child } from './subsonicService';
+import { getStreamUrl, type Child } from './subsonicService';
 
 /** Map our RepeatModeSetting to RNQP's RepeatMode string union. */
 export function mapRepeatMode(mode: RepeatModeSetting): RepeatMode {
@@ -94,7 +93,7 @@ export function stampQueueFormat(child: Child): EffectiveFormat {
  */
 export function childToTrack(
   child: Child,
-  cachedArt?: string | null,
+  artworkUrl?: string | null,
 ): TrackItem | null {
   const localUri = getLocalTrackUri(child.id);
   const offline = offlineModeStore.getState().offlineMode;
@@ -111,23 +110,13 @@ export function childToTrack(
     logImageCache(`player stream-url-for-cached-song id=${child.id}`);
   }
 
-  // Cover-art lookup resolves the song's `coverArt` value (album mode: the
-  // parent album's coverArt so every track in an album shares one cached file;
-  // per-track mode: the song's own) — see src/utils/coverArtId.ts.
-  const coverArtId = resolveSongCoverArt(child);
-  // In offline mode drop any server-only artwork so the lock-screen artwork
-  // fetch can't hit the network either. (`getCoverArtUrl` also returns null
-  // under offline mode; this is belt-and-braces.)
-  const artworkUrl = cachedArt
-    ?? (offline || !coverArtId ? undefined : getCoverArtUrl(coverArtId, 600) ?? undefined);
-
   return {
     id: child.id,
     url,
     title: child.title,
     artist: child.artist ?? i18n.t('unknownArtist'),
     album: child.album ?? undefined,
-    artworkUrl,
+    artworkUrl: artworkUrl ?? undefined,
     duration: child.duration ?? 0,
     ...replayGainFields(child),
   };
@@ -175,22 +164,17 @@ export async function buildPlayableQueue(queue: readonly Child[]): Promise<{
 }> {
   const songs = queue.map(completeSongFromCache);
 
-  // Resolve local cover artwork up front (async, DB-authoritative — off the JS
-  // thread), deduped by album coverArtId so a 500-track album resolves one URI,
-  // not 500. Then build the tracks synchronously from the resolved map.
-  const ids = Array.from(
-    new Set(songs.map((c) => resolveSongCoverArt(c)).filter((v): v is string => !!v)),
-  );
-  const artEntries = await Promise.all(
-    ids.map(async (id) => [id, await resolveCachedImageUri(id, 600)] as const),
-  );
-  const artMap = new Map<string, string | null>(artEntries);
+  // Artwork for the whole queue through the one cover resolver, in one query: the cached
+  // file, else the server URL online, else none (the player shows its placeholder).
+  const artwork = await resolveDisplayImages(songs, 600, {
+    offline: offlineModeStore.getState().offlineMode,
+  });
 
   const rnTracks: TrackItem[] = [];
   const filteredQueue: Child[] = [];
-  for (const child of songs) {
-    const coverArtId = resolveSongCoverArt(child);
-    const track = childToTrack(child, (coverArtId ? artMap.get(coverArtId) : null) ?? null);
+  for (let i = 0; i < songs.length; i++) {
+    const child = songs[i];
+    const track = childToTrack(child, artwork[i].uri);
     if (track) {
       rnTracks.push(track);
       filteredQueue.push(child);

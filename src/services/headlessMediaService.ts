@@ -28,10 +28,9 @@ import type { AlbumID3, Child, Playlist } from './subsonicService';
 import { buildPlayableQueue } from './playerHelpers';
 import { playTrack, initPlayer } from './playerService';
 import { initScrobbleService } from './scrobbleService';
-import { resolveDisplayImage } from './imageCacheService';
+import { resolveDisplayImage, resolveDisplayImages } from './imageCacheService';
 import { coverArtForAlbum, coverArtForPlaylist } from '../utils/coverArtId';
 import { baseCollator } from '../utils/intl';
-import { resolveSongCoverArt } from '../hooks/useSongCoverArt';
 import {
   searchLibrary,
   performOnlineSearch,
@@ -218,18 +217,6 @@ async function resolveRowArtwork(coverArtValue: string | undefined): Promise<str
   return (await resolveDisplayImage({ coverArt: coverArtValue }, ART_SIZE, { offline: isOffline() })).uri ?? undefined;
 }
 
-/** Resolve artwork for a set of coverArt values, DEDUPED — album mode makes a
- *  whole album's songs share one value, so a track list collapses to ~1 lookup. */
-async function artworkByValue(
-  values: ReadonlyArray<string | undefined>,
-): Promise<Map<string, string | undefined>> {
-  const distinct = [...new Set(values.filter((v): v is string => !!v))];
-  const resolved = await Promise.all(
-    distinct.map(async (v) => [v, await resolveRowArtwork(v)] as const),
-  );
-  return new Map(resolved);
-}
-
 async function albumRow(album: AlbumID3): Promise<BrowseItem> {
   return {
     id: albumId(album.id),
@@ -263,25 +250,21 @@ async function playlistRow(pl: Playlist): Promise<BrowseItem> {
   };
 }
 
-/** Playable song rows for a list, DEDUPED on cover art. `idFor(index)` builds
- *  the per-context media id (album / playlist / fav / search). */
+/** Playable song rows for a list, artwork from the one cover resolver in one query.
+ *  `idFor(index)` builds the per-context media id (album / playlist / fav / search). */
 async function trackRows(
   tracks: ReadonlyArray<Child>,
   idFor: (index: number) => string,
 ): Promise<BrowseItem[]> {
-  const values = tracks.map((t) => resolveSongCoverArt(t));
-  const artMap = await artworkByValue(values);
-  return tracks.map((t, i) => {
-    const cv = values[i];
-    return {
-      id: idFor(i),
-      title: t.title,
-      subtitle: t.artist ?? undefined,
-      artworkUrl: cv ? artMap.get(cv) : undefined,
-      playable: true,
-      hasChildren: false,
-    };
-  });
+  const artwork = await resolveDisplayImages(tracks, ART_SIZE, { offline: isOffline() });
+  return tracks.map((t, i) => ({
+    id: idFor(i),
+    title: t.title,
+    subtitle: t.artist ?? undefined,
+    artworkUrl: artwork[i].uri ?? undefined,
+    playable: true,
+    hasChildren: false,
+  }));
 }
 
 /* ------------------------------------------------------------------ */

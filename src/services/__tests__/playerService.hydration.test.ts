@@ -85,7 +85,10 @@ jest.mock('../../store/serverInfoStore', () => ({
 }));
 
 jest.mock('../scrobbleService', () => ({ addCompletedScrobble: jest.fn(), sendNowPlaying: jest.fn() }));
-jest.mock('../imageCacheService', () => ({ resolveCachedImageUri: jest.fn().mockResolvedValue(null) }));
+jest.mock('../imageCacheService', () => ({
+  resolveDisplayImages: jest.fn(async (subjects: unknown[]) =>
+    subjects.map(() => ({ coverArtId: undefined, uri: null, isRemote: false }))),
+}));
 jest.mock('../sslTrustService', () => ({ syncProxyUpstreams: jest.fn(() => Promise.resolve()) }));
 
 jest.mock('../musicCacheService', () => ({

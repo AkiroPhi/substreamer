@@ -65,7 +65,8 @@ jest.mock('../scrobbleService', () => ({
 }));
 
 jest.mock('../imageCacheService', () => ({
-  resolveCachedImageUri: jest.fn().mockResolvedValue(null),
+  resolveDisplayImages: jest.fn(async (subjects: unknown[]) =>
+    subjects.map(() => ({ coverArtId: undefined, uri: null, isRemote: false }))),
 }));
 
 jest.mock('../musicCacheService', () => ({
