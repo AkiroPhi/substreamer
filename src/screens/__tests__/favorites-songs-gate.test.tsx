@@ -129,7 +129,7 @@ describe('FavoritesScreen — the songs segment reads the aggregate from SQL', (
 });
 
 describe('FavoritesScreen — the NOT-YET-KNOWN window', () => {
-  it('does not suppress a segment that is about to appear', () => {
+  it('does not suppress a segment that is about to appear', async () => {
     // The aggregate IS downloaded, but the probe runs in an effect, i.e. after this frame.
     // Defaulting unknown to "absent" would blank the segment and then bring it back.
     seedStarredAggregate();
@@ -137,9 +137,11 @@ describe('FavoritesScreen — the NOT-YET-KNOWN window', () => {
     const r = render(<FavoritesScreen />);
     expect(suppressed(r)).toBe(false);
     expect(mockRenders[0].loading).toBe(true);
+    // Let the probe and the read land inside the test.
+    await waitFor(() => expect(latest().loading).toBe(false));
   });
 
-  it('keeps the list FILTERED while unknown — never a frame of undownloaded music', () => {
+  it('keeps the list FILTERED while unknown — never a frame of undownloaded music', async () => {
     // The other direction, and the one that must not fall through: an unfiltered frame
     // would show favourites that are not on the device, which is the single failure a
     // Downloaded filter cannot have.
@@ -147,6 +149,8 @@ describe('FavoritesScreen — the NOT-YET-KNOWN window', () => {
     filterBarStore.setState({ downloadedOnly: true });
     render(<FavoritesScreen />);
     expect(mockRenders[0].downloadedOnly).toBe(true);
+    // Let the probe and the read land inside the test.
+    await waitFor(() => expect(latest().loading).toBe(false));
   });
 
   it('never chooses the "download your favourites" copy before the answer', async () => {

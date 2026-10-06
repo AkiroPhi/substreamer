@@ -95,11 +95,13 @@ describe('SongLibraryListScreen — favourites filter never flashes the empty st
     await markStarredSongs(db(), [{ id: 'star-a', starredAt: 400 }]);
   });
 
-  it('is already loading on the FIRST render, before the SQL read resolves', () => {
+  it('is already loading on the FIRST render, before the SQL read resolves', async () => {
     render(<SongLibraryListScreen favoritesOnly />);
     // The read runs in an effect, i.e. after this frame is on screen. Loading has to be
     // seeded true or the list falls through to "No songs found" with zero rows.
     expect(mockRenders[0]).toMatchObject({ items: [], loading: true });
+    // Let the read land inside the test, so its state update isn't left for after it.
+    await waitFor(() => expect(latest().loading).toBe(false));
   });
 
   it('is never handed an empty, non-loading list while the read is in flight', async () => {
@@ -137,13 +139,15 @@ describe('SongLibraryListScreen — downloaded filter', () => {
     expect(latest().loading).toBe(false);
   });
 
-  it('is already loading on the FIRST render, before the SQL read resolves', () => {
+  it('is already loading on the FIRST render, before the SQL read resolves', async () => {
     markDownloadedInDb('dl1');
     render(<SongLibraryListScreen downloadedOnly />);
     // The downloaded read is asynchronous now, so it needs the same derived flag the
     // favourites branch has — otherwise this frame is empty-and-not-loading and
     // SongListView flashes "No songs found".
     expect(mockRenders[0]).toMatchObject({ items: [], loading: true });
+    // Let the read land inside the test, so its state update isn't left for after it.
+    await waitFor(() => expect(latest().loading).toBe(false));
   });
 
   it('is never handed an empty, non-loading list while the read is in flight', async () => {

@@ -159,6 +159,18 @@ jest.mock('@/components/EmptyState', () => {
   return { EmptyState: ({ title }: { title: string }) => <Text>{title}</Text> };
 });
 
+// The album-info hook loads asynchronously (store hydrate + fetch); it has its own suite.
+jest.mock('@/hooks/usePlayerAlbumInfo', () => ({
+  usePlayerAlbumInfo: () => ({
+    entry: undefined,
+    loading: false,
+    error: null,
+    refreshing: false,
+    handleRetry: jest.fn(),
+    handleRefresh: jest.fn(),
+  }),
+}));
+
 jest.mock('@/components/AlbumInfoContent', () => {
   const { Text } = require('react-native');
   return { AlbumInfoContent: () => <Text>AlbumInfoContent</Text> };

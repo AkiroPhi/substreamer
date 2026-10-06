@@ -146,12 +146,14 @@ describe('useDownloadedSongs', () => {
 });
 
 describe('useDownloadedSongs — the loading flag is real now', () => {
-  it('is loading on the FIRST render, before the SQL read resolves', () => {
+  it('is loading on the FIRST render, before the SQL read resolves', async () => {
     seedCachedSong('s1', 'Alpha');
     const { result } = renderHook(() => useDownloadedSongs({ downloadedOnly: true }));
     // The read runs in an effect. Without this frame reporting loading, the list view
     // renders an empty, non-loading frame and flashes "No songs found".
     expect(result.current).toMatchObject({ rows: [], loading: true });
+    // Let the read land inside the test.
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 
   it('clears loading once the read lands, even when the set is empty', async () => {

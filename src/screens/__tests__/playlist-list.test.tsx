@@ -75,11 +75,13 @@ beforeEach(() => {
 describe('PlaylistListScreen — downloaded filter never flashes the empty state', () => {
   beforeEach(() => seedDownloadedPlaylist('pl1'));
 
-  it('is already loading on the FIRST render, before the SQL read resolves', () => {
+  it('is already loading on the FIRST render, before the SQL read resolves', async () => {
     render(<PlaylistListScreen downloadedOnly />);
     // The read runs in an effect, i.e. after this frame is on screen. Loading has to be
     // derived-true or the list falls through to its empty placeholder with zero rows.
     expect(mockRenders[0]).toMatchObject({ items: [], loading: true });
+    // Let the read land inside the test, so its state update isn't left for after it.
+    await waitFor(() => expect(latest().loading).toBe(false));
   });
 
   it('is never handed an empty, non-loading list while the read is in flight', async () => {
