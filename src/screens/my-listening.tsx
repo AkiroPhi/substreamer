@@ -18,7 +18,6 @@ import { StatCard } from '../components/StatCard';
 import { TopItemRow } from '../components/TopItemRow';
 import { usePeriodAggregates, usePlaybackAnalytics, type TimePeriod } from '../hooks/usePlaybackAnalytics';
 import { useRefreshControlKey } from '../hooks/useRefreshControlKey';
-import { albumCoverArtById, resolveSongCoverArt, useSongCoverArt } from '../hooks/useSongCoverArt';
 import { useTheme } from '../hooks/useTheme';
 import { useTransitionComplete } from '../hooks/useTransitionComplete';
 import { playTrack } from '../services/playerService';
@@ -73,7 +72,6 @@ interface ScrobbleRowProps {
 function ScrobbleRow({ song, time, onPress, showAlbumInSubtitle }: ScrobbleRowProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
-  const songCoverArtId = useSongCoverArt(song);
 
   const subtitle = showAlbumInSubtitle
     ? `${song.artist ?? t('unknownArtist')} — ${song.album ?? t('unknownAlbum')}`
@@ -82,7 +80,8 @@ function ScrobbleRow({ song, time, onPress, showAlbumInSubtitle }: ScrobbleRowPr
   const content = (
     <>
       <CachedImage
-        coverArtId={songCoverArtId}
+        coverArtId={song.coverArt}
+        albumId={song.albumId}
         size={150}
         style={styles.recentThumb}
         resizeMode="cover"
@@ -349,7 +348,8 @@ export function MyListeningScreen() {
               subtitle={item.song.artist ?? undefined}
               count={item.count}
               maxCount={analytics.topSongs[0].count}
-              coverArtId={resolveSongCoverArt(item.song)}
+              coverArtId={item.song.coverArt}
+              albumId={item.song.albumId}
               colors={colors}
               index={i}
               onPress={onPlaySong(item.song)}
@@ -390,10 +390,8 @@ export function MyListeningScreen() {
               subtitle={item.artist}
               count={item.count}
               maxCount={analytics.topAlbums[0].count}
-              // The aggregate already carries the cover art captured at scrobble time;
-              // prefer it over the album lookup, which is a synchronous cache read that
-              // returns undefined on a miss and never re-renders when the fill lands.
-              coverArtId={item.coverArt ?? albumCoverArtById(item.albumId)}
+              // The aggregate carries the album's own cover.
+              coverArtId={item.coverArt}
               colors={colors}
               index={i}
               onPress={onOpenAlbum(item.albumId)}

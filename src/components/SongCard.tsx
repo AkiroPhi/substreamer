@@ -10,7 +10,6 @@ import { CompactRatingBadge } from './StarRating';
 import { useDownloadStatus } from '../hooks/useDownloadStatus';
 import { useIsStarred } from '../hooks/useIsStarred';
 import { useRating } from '../hooks/useRating';
-import { useSongCoverArt } from '../hooks/useSongCoverArt';
 import { useTheme } from '../hooks/useTheme';
 import { type Child } from '../services/subsonicService';
 import { playTrack } from '../services/playerService';
@@ -37,7 +36,6 @@ export const SongCard = memo(function SongCard({
   const starred = useIsStarred('song', song.id);
   const downloaded = useDownloadStatus('song', song.id) === 'complete';
   const rating = useRating(song.id, song.userRating);
-  const songCoverArtId = useSongCoverArt(song);
 
   // See `TrackRow.handleLongPress` — the card can be built from the same narrow list
   // projection, and the sheet reads far more of the track than a card renders.
@@ -57,7 +55,8 @@ export const SongCard = memo(function SongCard({
       <View style={[styles.card, { backgroundColor: colors.card }, width != null && { width }]}>
         <View style={styles.imageContainer}>
           <CachedImage
-            coverArtId={songCoverArtId}
+            coverArtId={song.coverArt}
+            albumId={song.albumId}
             size={COVER_SIZE}
             style={styles.cover}
             resizeMode="cover"

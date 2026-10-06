@@ -69,8 +69,8 @@ jest.mock('../../hooks/useDownloadStatus', () => ({
 }));
 jest.mock('../../hooks/useIsStarred', () => ({ useIsStarred: () => false }));
 jest.mock('../../hooks/useRating', () => ({ useRating: () => 0 }));
-jest.mock('../../hooks/useSongCoverArt', () => ({
-  resolveEntityCoverArt: () => undefined,
+jest.mock('../../services/imageCacheService', () => ({
+  resolveCoverArtId: jest.fn(async (subject: { coverArt?: string | null }) => subject.coverArt ?? undefined),
 }));
 
 jest.mock('../../services/moreOptionsService', () => ({

@@ -38,7 +38,6 @@ import { useDownloadStatus } from '../hooks/useDownloadStatus';
 import { useDetailFetch } from '../hooks/useDetailFetch';
 import { useLayoutMode } from '../hooks/useLayoutMode';
 import { useRefreshControlKey } from '../hooks/useRefreshControlKey';
-import { useSongCoverArt } from '../hooks/useSongCoverArt';
 import { useTheme } from '../hooks/useTheme';
 import { useTransitionComplete } from '../hooks/useTransitionComplete';
 import { ensureCached, refreshCoverArt } from '../services/imageCacheService';
@@ -78,7 +77,6 @@ const EditTrackRow = memo(function EditTrackRow({
 }) {
   const { t } = useTranslation();
   const drag = useReorderableDrag();
-  const songCoverArtId = useSongCoverArt(item);
 
   const handleDelete = useCallback(() => onDelete(index), [onDelete, index]);
 
@@ -103,7 +101,8 @@ const EditTrackRow = memo(function EditTrackRow({
     >
       <View style={[styles.editRow, { borderBottomColor: colors.border }]}>
         <CachedImage
-          coverArtId={songCoverArtId}
+          coverArtId={item.coverArt}
+          albumId={item.albumId}
           size={300}
           style={styles.editCover}
           resizeMode="cover"

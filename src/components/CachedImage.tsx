@@ -51,6 +51,7 @@ import {
 import { logImageCache } from '../services/imageCacheLogger';
 import { STARRED_COVER_ART_ID } from '../services/musicCacheService';
 import { VARIOUS_ARTISTS_COVER_ART_ID } from '../services/subsonicService';
+import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
 import { offlineModeStore } from '../store/offlineModeStore';
 
 import { absoluteFill } from '../utils/styles';
@@ -91,8 +92,11 @@ const VARIOUS_ARTISTS_COVER_URI = RNImage.resolveAssetSource(
 /* ------------------------------------------------------------------ */
 
 export interface CachedImageProps extends Omit<ImageProps, 'source'> {
-  /** Subsonic cover art ID (e.g. `album.coverArt`). */
+  /** Subsonic cover art ID (e.g. `album.coverArt`); for a song, the song's own `coverArt`. */
   coverArtId: string | undefined;
+  /** A song's `albumId`, so album cover mode shows its album's cover. Omit for albums, artists
+   *  and playlists, whose own `coverArt` is the cover. */
+  albumId?: string | null;
   /** Requested image size tier (50 | 150 | 300 | 600). */
   size: number;
   /** Optional fallback URI when coverArtId is missing or URL construction fails. */
@@ -116,6 +120,7 @@ function computeLogoSize(w: number | undefined, h: number | undefined): number {
 
 export const CachedImage = memo(function CachedImage({
   coverArtId: rawCoverArtId,
+  albumId,
   size,
   fallbackUri: rawFallbackUri,
   style,
@@ -146,23 +151,30 @@ export const CachedImage = memo(function CachedImage({
   // (`isRemote:true`), or null while resolving / placeholder. NO synchronous
   // FS/SQLite on render.
   const [resolved, setResolved] = useState<{ uri: string; isRemote: boolean } | null>(null);
+  // A song's cover token is only known once resolved (album mode → its album's). Everything
+  // keyed on the token during render reads `token`; an entity's token is its own id.
+  const [resolvedToken, setResolvedToken] = useState<string | undefined>(undefined);
+  const token = albumId ? resolvedToken : coverArtId;
+  const songCoverArtMode = layoutPreferencesStore((s) => s.songCoverArtMode);
 
   // Per-mount flag: "I already tried the local URI and it failed." Reset on a
   // cache-update or an id/size change (fresh attempt).
   const localErroredRef = useRef(false);
-  const currentIdRef = useRef(coverArtId);
-  const currentSizeRef = useRef(size);
-  if (currentIdRef.current !== coverArtId || currentSizeRef.current !== size) {
-    currentIdRef.current = coverArtId;
-    currentSizeRef.current = size;
+  // Keyed on the SUBJECT (id + album), never the resolved token: a recycled cell given a new
+  // song must drop the old token at once, not when the new one resolves.
+  const subjectKey = `${coverArtId ?? ''}|${albumId ?? ''}|${size}`;
+  const currentKeyRef = useRef(subjectKey);
+  if (currentKeyRef.current !== subjectKey) {
+    currentKeyRef.current = subjectKey;
     localErroredRef.current = false;
     // Reset synchronously (React's "adjust state during render" pattern) so a
     // recycled FlashList cell never shows the previous cover while the new one
     // resolves.
     setResolved(null);
+    setResolvedToken(undefined);
   }
 
-  const remoteFailed = coverArtId ? isRemoteFailed(coverArtId) : false;
+  const remoteFailed = token ? isRemoteFailed(token) : false;
   const offline = offlineModeStore((s) => s.offlineMode);
 
   // Resolve the display target asynchronously via the shared resolver (file://
@@ -176,18 +188,19 @@ export const CachedImage = memo(function CachedImage({
       return;
     }
     let cancelled = false;
-    resolveDisplayImage({ coverArt: coverArtId }, size, {
+    resolveDisplayImage({ coverArt: coverArtId, albumId }, size, {
       offline,
       skipCache: localErroredRef.current,
     })
       .then((r) => {
         if (cancelled) return;
         const shown = r.uri ? { uri: r.uri, isRemote: r.isRemote } : null;
+        setResolvedToken(r.coverArtId);
         setResolved(shown);
         // Cache miss (no local file) → fetch it; NOT when we deliberately
         // skipped a bad cached file (it exists; reportBadCache handled it).
-        if (!localErroredRef.current && (shown == null || shown.isRemote)) {
-          ensureCached(coverArtId);
+        if (r.coverArtId && !localErroredRef.current && (shown == null || shown.isRemote)) {
+          ensureCached(r.coverArtId);
         }
       })
       .catch(() => {
@@ -196,7 +209,8 @@ export const CachedImage = memo(function CachedImage({
     return () => {
       cancelled = true;
     };
-  }, [coverArtId, size, resolveToken, offline]);
+    // `songCoverArtMode` re-resolves a song's token when the cover mode changes.
+  }, [coverArtId, albumId, size, resolveToken, offline, songCoverArtMode]);
 
   // What to render: the shared resolver already picked LOCAL vs REMOTE (gated on
   // offline + the remote-failed set); fall back to the bundled placeholder URI.
@@ -206,25 +220,25 @@ export const CachedImage = memo(function CachedImage({
 
   // Subscribe — fires on file landed OR remote-failed flag flipped.
   useEffect(() => {
-    if (!coverArtId) return;
-    return subscribeImageCacheUpdate(coverArtId, () => {
+    if (!token) return;
+    return subscribeImageCacheUpdate(token, () => {
       localErroredRef.current = false;
       bumpResolve();
     });
-  }, [coverArtId]);
+  }, [token]);
 
   // Error handler — three branches, no retry tower.
   const onError = useCallback(() => {
-    if (!coverArtId) return;
+    if (!token) return;
     const hadCached = resolved != null && !resolved.isRemote; // was showing a file:// cache hit
     if (hadCached) {
       localErroredRef.current = true;
-      void reportBadCache(coverArtId, size);
+      void reportBadCache(token, size);
     } else if (resolved?.isRemote) {
-      void reportBadRemote(coverArtId);
+      void reportBadRemote(token);
     }
     bumpResolve();
-  }, [coverArtId, size, resolved]);
+  }, [token, size, resolved]);
 
   // Layout measurement for placeholder logo sizing.
   const [layoutSize, setLayoutSize] = useState<{ w: number; h: number } | null>(null);
@@ -256,9 +270,9 @@ export const CachedImage = memo(function CachedImage({
         ? 'remote'
         : 'placeholder';
     logImageCache(
-      `CachedImage state id=${coverArtId} size=${size} ${where} remoteFailed=${remoteFailed}`,
+      `CachedImage state id=${token ?? coverArtId} size=${size} ${where} remoteFailed=${remoteFailed}`,
     );
-  }, [coverArtId, size, resolved, isRemote, remoteFailed, fallbackUri]);
+  }, [coverArtId, token, size, resolved, isRemote, remoteFailed, fallbackUri]);
 
   const flatStyle = StyleSheet.flatten(style) as (ImageStyle & ViewStyle) | undefined;
   const contentFit = RESIZE_MODE_TO_CONTENT_FIT[resizeMode ?? 'cover'] ?? 'cover';
@@ -288,7 +302,7 @@ export const CachedImage = memo(function CachedImage({
           // id+size for FlashList recycling; resolveToken forces a reload when
           // reportBadCache re-downloads the same file:// path (expo-image has
           // no per-key memory eviction).
-          recyclingKey={`${rawCoverArtId}:${size}:${resolveToken}`}
+          recyclingKey={`${token ?? rawCoverArtId}:${size}:${resolveToken}`}
           // We own resize (pre-sized variants) + disk cache (imageCacheService),
           // so expo-image retains nothing.
           cachePolicy="none"

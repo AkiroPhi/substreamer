@@ -33,9 +33,12 @@ interface ImagePaletteResult {
   gradientOpacity: SharedValue<number>;
 }
 
-export function useImagePalette(coverArtId: string | undefined): ImagePaletteResult {
+export function useImagePalette(
+  coverArtId: string | undefined,
+  albumId?: string | null,
+): ImagePaletteResult {
   const skip = coverArtId === SKIP_COLOR_EXTRACTION;
-  const cachedUri = useCachedCoverArt(skip ? undefined : coverArtId, 300);
+  const cachedUri = useCachedCoverArt(skip ? undefined : coverArtId, 300, albumId);
   const { theme } = useTheme();
   const [palette, setPalette] = useState<Palette | null>(null);
   const gradientOpacity = useSharedValue(0);

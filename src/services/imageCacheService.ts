@@ -91,7 +91,6 @@ import {
   type Child,
   type Playlist,
 } from './subsonicService';
-import { resolveEntityCoverArt, resolveSongCoverArt } from '../hooks/useSongCoverArt';
 
 // Sentinel cover-art IDs rendered from bundled assets via
 // `CachedImage.tsx`, never downloaded. Inlined here (not imported)
@@ -1403,6 +1402,20 @@ export async function resolveDisplayImages(
   });
 }
 
+/** Just the cover tokens, by the same rule as {@link resolveDisplayImages} (no image needed). */
+export async function resolveCoverArtIds(
+  subjects: readonly CoverSubject[],
+): Promise<Array<string | undefined>> {
+  return (await resolveDisplayImages(subjects, SOURCE_SIZE, { offline: true })).map(
+    (r) => r.coverArtId,
+  );
+}
+
+/** One cover's token — see {@link resolveCoverArtIds}. */
+export async function resolveCoverArtId(subject: CoverSubject): Promise<string | undefined> {
+  return (await resolveCoverArtIds([subject]))[0];
+}
+
 /** One cover — see {@link resolveDisplayImages}. */
 export async function resolveDisplayImage(
   subject: CoverSubject,
@@ -2096,25 +2109,18 @@ export async function clearImageCache(
 }
 
 /**
- * Proactively cache cover art for a list of entities (songs, albums,
- * artists, playlists). Keys off the entity's `coverArt` value via
- * `resolveEntityCoverArt` (mode-aware for songs) so the warmed file matches
- * what the render side reads. Deduplicates by resolved value and skips entries
- * already in cache.
+ * Warm the cache for browsed entities, fire-and-forget. Tokens come from the one cover rule
+ * (`resolveCoverArtIds`): a song follows the cover mode, an album / artist / playlist uses its
+ * own cover. `cacheAllSizes` skips covers already on disk.
  */
 export function prefetchCoverArt(
   entities: Array<AlbumID3 | ArtistID3 | Playlist | Child>,
 ): void {
-  const seen = new Set<string>();
-  for (const entity of entities) {
-    const id = resolveEntityCoverArt(entity);
-    if (id && !seen.has(id)) {
-      seen.add(id);
-      // cacheAllSizes does its own DB-authoritative all-cached check and
-      // no-ops when complete, so no pre-check needed.
+  void resolveCoverArtIds(entities).then((ids) => {
+    for (const id of new Set(ids.filter((v): v is string => !!v))) {
       cacheAllSizes(id).catch(() => { /* non-critical */ });
     }
-  }
+  });
 }
 
 /**
@@ -2166,7 +2172,8 @@ function hydrateCachedItemsForRecache(): {
   const songCoverArtIds: string[] = [];
   const seen = new Set<string>();
   for (const s of Object.values(hydrateCachedSongs())) {
-    const id = resolveSongCoverArt(s);
+    // No database means no album lookup, so the song's own cover is the answer.
+    const id = s.coverArt ?? undefined;
     if (!id || seen.has(id)) continue;
     seen.add(id);
     songCoverArtIds.push(id);
@@ -2624,11 +2631,9 @@ function snapshotDownloadedCoverArtIds(): string[] {
 
   // Every cover-art TOKEN a downloaded surface can render, in BOTH cover-art modes.
   //
-  // Mode-independent on purpose. `resolveSongCoverArt` answers for the mode that happens
-  // to be set, so warming through it caches one mode and leaves the other blank — and the
-  // setting is reachable offline, where nothing can be fetched to repair it. Album mode
-  // reads the parent album's token, per-track mode the song's own, so both are warmed and
-  // switching offline just works. Where they are the same value the dedup drops it.
+  // Mode-independent on purpose: album mode shows the parent album's token and per-track
+  // mode the song's own, and the setting is reachable offline, where nothing can be fetched
+  // to fill the other. So both are warmed; where they are the same value the dedup drops it.
   //
   // Never `cached_items.cover_art_id`: that column is frozen at download time and holds a
   // BARE ENTITY ID, so warming it fills the cache under a key nothing reads. Measured on a

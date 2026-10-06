@@ -39,9 +39,8 @@ jest.mock('../../hooks/useDownloadStatus', () => ({
 }));
 jest.mock('../../hooks/useIsStarred', () => ({ useIsStarred: () => false }));
 jest.mock('../../hooks/useRating', () => ({ useRating: () => 0 }));
-jest.mock('../../hooks/useSongCoverArt', () => ({
-  useSongCoverArt: () => undefined,
-  resolveEntityCoverArt: () => undefined,
+jest.mock('../../services/imageCacheService', () => ({
+  resolveCoverArtId: jest.fn(async () => undefined),
 }));
 jest.mock('../../hooks/useConfirmAlbumRemoval', () => ({
   useConfirmAlbumRemoval: () => ({ confirmRemove: jest.fn() }),

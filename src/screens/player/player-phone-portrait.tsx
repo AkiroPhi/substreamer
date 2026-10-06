@@ -47,7 +47,6 @@ import { closeOpenRow } from '@/components/SwipeableRow';
 import { type ThemeColors } from '@/constants/theme';
 import { useCanSkip } from '@/hooks/useCanSkip';
 import { useCoverGradient } from '@/hooks/useCoverGradient';
-import { useSongCoverArt } from '@/hooks/useSongCoverArt';
 import { usePlayerActions } from '@/hooks/usePlayerActions';
 import { usePlaybackState } from '@/hooks/usePlaybackState';
 import { useShuffleOverlay } from '@/hooks/useShuffleOverlay';
@@ -91,7 +90,8 @@ export function PlayerPhonePortrait() {
   const navigation = useNavigation();
   const router = useRouter();
   const currentTrack = playerStore((s) => s.currentTrack);
-  const songCoverArtId = useSongCoverArt(currentTrack);
+  const songCoverArtId = currentTrack?.coverArt ?? undefined;
+  const songAlbumId = currentTrack?.albumId;
   const currentTrackIndex = playerStore((s) => s.currentTrackIndex);
   const queue = playerStore((s) => s.queue);
   const queueLoading = playerStore((s) => s.queueLoading);
@@ -112,6 +112,7 @@ export function PlayerPhonePortrait() {
   const { gradientColors, gradientLocations, gradientOpacity } = useCoverGradient(
     songCoverArtId,
     colors.background,
+    songAlbumId,
   );
 
   const offlineMode = offlineModeStore((s) => s.offlineMode);
@@ -458,7 +459,8 @@ const PlayerContent = memo(function PlayerContent({
   shuffling,
 }: PlayerContentProps) {
   const { t } = useTranslation();
-  const songCoverArtId = useSongCoverArt(currentTrack);
+  const songCoverArtId = currentTrack?.coverArt ?? undefined;
+  const songAlbumId = currentTrack?.albumId;
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { isPlaying, isBuffering } = usePlaybackState();
@@ -535,6 +537,7 @@ const PlayerContent = memo(function PlayerContent({
         <View style={[styles.heroImageWrap, { width: heroSize, height: heroSize }]}>
           <CachedImage
             coverArtId={songCoverArtId}
+            albumId={songAlbumId}
             size={HERO_COVER_SIZE}
             style={styles.heroImage}
             resizeMode="cover"

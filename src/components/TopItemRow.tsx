@@ -14,6 +14,8 @@ interface TopItemRowProps {
   count: number;
   maxCount: number;
   coverArtId?: string;
+  /** For a song row: its `albumId`, so album cover mode shows its album's cover. */
+  albumId?: string | null;
   colors: ThemeColors;
   /** Initials shown when no coverArt (e.g. for artists). */
   initials?: string;
@@ -29,6 +31,7 @@ export const TopItemRow = memo(function TopItemRow({
   count,
   maxCount,
   coverArtId,
+  albumId,
   colors,
   initials,
   index,
@@ -60,6 +63,7 @@ export const TopItemRow = memo(function TopItemRow({
         // nothing until some unrelated re-render.
         <CachedImage
           coverArtId={coverArtId}
+          albumId={albumId}
           size={150}
           style={styles.thumbnail}
           resizeMode="cover"

@@ -12,9 +12,13 @@ const PLAYER_GRADIENT_LOCATIONS: readonly [number, number, ...number[]] = [0, 0.
  * (phone/tablet-portrait fade it straight in; landscape folds it into its
  * expand animation).
  */
-export function useCoverGradient(coverArtId: string | undefined, endColor: string) {
+export function useCoverGradient(
+  coverArtId: string | undefined,
+  endColor: string,
+  albumId?: string | null,
+) {
   const { colors } = useTheme();
-  const { primary, gradientOpacity } = useImagePalette(coverArtId);
+  const { primary, gradientOpacity } = useImagePalette(coverArtId, albumId);
   const gradientTopColor = primary ?? colors.background;
   const gradientColors: readonly [string, string, ...string[]] = [gradientTopColor, endColor];
   return { gradientColors, gradientLocations: PLAYER_GRADIENT_LOCATIONS, gradientOpacity };

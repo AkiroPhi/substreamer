@@ -16,6 +16,7 @@
  */
 import { getDb, type InternalDb } from './db';
 import type { Cursor } from '../../db/repository/core';
+import { ALBUM_COVER_TOKEN_SQL } from '../../db/repository/coverArt';
 import {
   rowToScrobble,
   SCROBBLE_SELECT,
@@ -117,8 +118,13 @@ export async function computeScrobbleAnalytics(sinceMs = 0): Promise<ScrobbleAna
           album_id: string | null;
           c: number;
         }>(
-          `SELECT album, artist, MAX(cover_art) AS cover_art, MAX(album_id) AS album_id, COUNT(*) AS c ` +
-            `FROM scrobble_events ${whereOf('album IS NOT NULL')} GROUP BY album, artist`,
+          // The album's OWN cover (library, then downloaded metadata); a scrobble's cover_art
+          // is its track's, which on Navidrome is disc or file art, not the album's.
+          `SELECT g.album, g.artist, COALESCE(${ALBUM_COVER_TOKEN_SQL}, g.cover_art) AS cover_art, ` +
+            `g.album_id, g.c FROM (` +
+            `SELECT album, artist, MAX(cover_art) AS cover_art, MAX(album_id) AS album_id, COUNT(*) AS c ` +
+            `FROM scrobble_events ${whereOf('album IS NOT NULL')} GROUP BY album, artist` +
+            `) g LEFT JOIN albums a ON a.id = g.album_id LEFT JOIN cached_albums ca ON ca.item_id = g.album_id`,
           p,
         ),
         // One row per song: the play count, the two fields every-song consumers read,

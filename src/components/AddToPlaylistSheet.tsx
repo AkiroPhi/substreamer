@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import { BottomSheet } from './BottomSheet';
 import { CachedImage } from './CachedImage';
-import { resolveSongCoverArt } from '../hooks/useSongCoverArt';
+import { type CoverSubject } from '../services/imageCacheService';
 import { useTheme } from '../hooks/useTheme';
 import { coverArtForAlbum } from '../utils/coverArtId';
 import { syncCachedItemTracks } from '../services/musicCacheService';
@@ -62,12 +62,12 @@ async function resolveSongIds(target: AddToPlaylistTarget): Promise<string[] | n
   return full.song.map((s) => s.id);
 }
 
-function getTargetCoverArt(target: AddToPlaylistTarget): string | undefined {
-  // `coverArt`-value based cover art (see src/utils/coverArtId.ts).
-  if (target.type === 'song') return resolveSongCoverArt(target.item);
-  if (target.type === 'album') return coverArtForAlbum(target.item);
+/** What the target's cover resolves from: a song (or the queue's first) also carries its album. */
+function getTargetCover(target: AddToPlaylistTarget): CoverSubject | undefined {
+  if (target.type === 'song') return { coverArt: target.item.coverArt, albumId: target.item.albumId };
+  if (target.type === 'album') return { coverArt: coverArtForAlbum(target.item) };
   const first = target.songs[0];
-  return first ? resolveSongCoverArt(first) : undefined;
+  return first ? { coverArt: first.coverArt, albumId: first.albumId } : undefined;
 }
 
 function getSubtitleText(target: AddToPlaylistTarget, t: (key: string, options?: Record<string, unknown>) => string): string {
@@ -276,13 +276,19 @@ export function AddToPlaylistSheet() {
   );
 
   const subtitle = target ? getSubtitleText(target, t) : '';
-  const coverArtId = target ? getTargetCoverArt(target) : undefined;
+  const cover = target ? getTargetCover(target) : undefined;
 
   return (
     <BottomSheet visible={visible} onClose={handleClose} maxHeight="70%" scrollable={false}>
       <View style={styles.header}>
-        {coverArtId && (
-          <CachedImage coverArtId={coverArtId} size={150} style={styles.coverArt} resizeMode="cover" />
+        {(cover?.coverArt || cover?.albumId) && (
+          <CachedImage
+            coverArtId={cover.coverArt ?? undefined}
+            albumId={cover.albumId}
+            size={150}
+            style={styles.coverArt}
+            resizeMode="cover"
+          />
         )}
         <View style={styles.headerText}>
           <Text style={[styles.title, dynamicStyles.title]} numberOfLines={1}>

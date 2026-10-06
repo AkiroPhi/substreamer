@@ -37,7 +37,6 @@ import { CastButton } from '@/components/RoutePicker';
 import { type ThemeColors } from '@/constants/theme';
 import { useCanSkip } from '@/hooks/useCanSkip';
 import { useCoverGradient } from '@/hooks/useCoverGradient';
-import { useSongCoverArt } from '@/hooks/useSongCoverArt';
 import { usePlayerActions } from '@/hooks/usePlayerActions';
 import { usePlaybackState } from '@/hooks/usePlaybackState';
 import { useShuffleOverlay } from '@/hooks/useShuffleOverlay';
@@ -78,7 +77,8 @@ export function PlayerTabletPortrait() {
   const { height: screenH, width: screenW } = useWindowDimensions();
 
   const currentTrack = playerStore((s) => s.currentTrack);
-  const songCoverArtId = useSongCoverArt(currentTrack);
+  const songCoverArtId = currentTrack?.coverArt ?? undefined;
+  const songAlbumId = currentTrack?.albumId;
   const currentTrackIndex = playerStore((s) => s.currentTrackIndex);
   const queue = playerStore((s) => s.queue);
   const offlineMode = offlineModeStore((s) => s.offlineMode);
@@ -125,6 +125,7 @@ export function PlayerTabletPortrait() {
   const { gradientColors, gradientLocations, gradientOpacity } = useCoverGradient(
     songCoverArtId,
     colors.background,
+    songAlbumId,
   );
 
   const gradientAnimatedStyle = useAnimatedStyle(() => ({
@@ -215,6 +216,7 @@ export function PlayerTabletPortrait() {
               <View style={[styles.heroImageWrap, { width: artSize, height: artSize }]}>
                 <CachedImage
                   coverArtId={songCoverArtId}
+                  albumId={songAlbumId}
                   size={HERO_COVER_SIZE}
                   style={styles.heroImage}
                   resizeMode="cover"

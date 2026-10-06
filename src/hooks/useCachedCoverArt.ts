@@ -1,7 +1,7 @@
 /**
- * Hook that resolves a cover art URI from the local disk cache
- * (if available) or the remote Subsonic URL, and triggers a
- * background cache download on a miss.
+ * Hook that resolves a cover's URI through the one cover resolver
+ * (`resolveDisplayImage`): the cached file, else the server URL online, else
+ * `null`. Triggers a background cache download on a miss.
  *
  * Intended for non-Image consumers like `react-native-image-colors`.
  * Resolution is asynchronous and DB-authoritative — no synchronous
@@ -9,62 +9,56 @@
  * download lands.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 
 import {
   ensureCached,
-  resolveCachedImageUri,
+  resolveDisplayImage,
   subscribeImageCacheUpdate,
 } from '../services/imageCacheService';
-import { getCoverArtUrl } from '../services/subsonicService';
+import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
+import { offlineModeStore } from '../store/offlineModeStore';
 
 /**
- * Returns a URI (file:// or http(s)://) for the given cover art,
- * preferring the local cache.  Triggers background caching on miss.
+ * Returns a URI (file:// or http(s)://) for the cover, preferring the local cache, or `null`
+ * while resolving / when nothing is displayable. Pass a song's `albumId` so album cover mode
+ * resolves its album's cover.
  */
 export function useCachedCoverArt(
   coverArtId: string | undefined,
   size: number,
+  albumId?: string | null,
 ): string | null {
-  const [uri, setUri] = useState<string | null>(() =>
-    coverArtId ? getCoverArtUrl(coverArtId, size) : null,
-  );
+  const offline = offlineModeStore((s) => s.offlineMode);
+  const songCoverArtMode = layoutPreferencesStore((s) => s.songCoverArtMode);
+  const [resolved, setResolved] = useState<{ uri: string | null; token?: string }>({ uri: null });
+  const [resolveToken, bumpResolve] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
     if (!coverArtId) {
-      setUri(null);
+      setResolved({ uri: null });
       return;
     }
     let cancelled = false;
-
-    const resolve = () => {
-      resolveCachedImageUri(coverArtId, size)
-        .then((cached) => {
-          if (cancelled) return;
-          if (cached) {
-            setUri(cached);
-          } else {
-            // Not cached: fall back to the remote URL and kick off caching.
-            setUri(getCoverArtUrl(coverArtId, size));
-            ensureCached(coverArtId).catch(() => {
-              /* non-critical: caching failure falls back to network URL */
-            });
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setUri(getCoverArtUrl(coverArtId, size));
+    resolveDisplayImage({ coverArt: coverArtId, albumId }, size, { offline }).then((r) => {
+      if (cancelled) return;
+      setResolved({ uri: r.uri, token: r.coverArtId });
+      if (r.coverArtId && (r.uri == null || r.isRemote)) {
+        ensureCached(r.coverArtId).catch(() => {
+          /* non-critical: caching failure falls back to the network URL */
         });
-    };
-
-    resolve();
-    // Re-resolve when a download/resize lands for this id.
-    const unsub = subscribeImageCacheUpdate(coverArtId, resolve);
-
+      }
+    });
     return () => {
       cancelled = true;
-      unsub();
     };
-  }, [coverArtId, size]);
+  }, [coverArtId, albumId, size, offline, songCoverArtMode, resolveToken]);
 
-  return uri;
+  // Re-resolve when a download/resize lands for the resolved cover.
+  useEffect(() => {
+    if (!resolved.token) return;
+    return subscribeImageCacheUpdate(resolved.token, bumpResolve);
+  }, [resolved.token]);
+
+  return resolved.uri;
 }

@@ -39,7 +39,6 @@ import { SleepTimerCapsule } from '@/components/SleepTimerCapsule';
 import { closeOpenRow } from '@/components/SwipeableRow';
 import { useCanSkip } from '@/hooks/useCanSkip';
 import { useCoverGradient } from '@/hooks/useCoverGradient';
-import { useSongCoverArt } from '@/hooks/useSongCoverArt';
 import { mixHexColors } from '@/utils/colors';
 import { usePlayerActions } from '@/hooks/usePlayerActions';
 import { usePlaybackState } from '@/hooks/usePlaybackState';
@@ -77,7 +76,8 @@ export function PlayerTabletLandscape({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const currentTrack = playerStore((s) => s.currentTrack);
-  const songCoverArtId = useSongCoverArt(currentTrack);
+  const songCoverArtId = currentTrack?.coverArt ?? undefined;
+  const songAlbumId = currentTrack?.albumId;
   const currentTrackIndex = playerStore((s) => s.currentTrackIndex);
   const queue = playerStore((s) => s.queue);
   const { isPlaying, isBuffering } = usePlaybackState();
@@ -101,7 +101,7 @@ export function PlayerTabletLandscape({
   // Slightly-darkened theme background as the gradient's lower stop.
   const backgroundEnd = mixHexColors(colors.background, '#000000', 0.15);
   const { gradientColors, gradientLocations, gradientOpacity: extractedGradientOpacity } =
-    useCoverGradient(songCoverArtId, backgroundEnd);
+    useCoverGradient(songCoverArtId, backgroundEnd, songAlbumId);
 
   // Right panel mode: queue (default), lyrics, or album info
   const [rightPanelMode, setRightPanelMode] = useState<'queue' | 'lyrics' | 'info'>('queue');
@@ -309,6 +309,7 @@ export function PlayerTabletLandscape({
                   >
                     <CachedImage
                       coverArtId={songCoverArtId}
+                      albumId={songAlbumId}
                       size={HERO_COVER_SIZE}
                       style={styles.coverImage}
                       resizeMode="cover"

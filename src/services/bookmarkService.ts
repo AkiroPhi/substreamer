@@ -3,7 +3,6 @@ import * as Crypto from 'expo-crypto';
 import { playTrack, seekTo } from './playerService';
 import { flushPosition } from './queuePersistenceService';
 import { type Child } from './subsonicService';
-import { resolveSongCoverArt } from '../hooks/useSongCoverArt';
 import { bookmarksStore, type PlayQueueBookmark } from '../store/bookmarksStore';
 import { playerStore } from '../store/playerStore';
 import { getDateTimeFormat } from '../utils/intl';
@@ -145,13 +144,6 @@ export async function restoreBookmark(bookmark: PlayQueueBookmark): Promise<void
 export function bookmarkCurrentTrack(bookmark: PlayQueueBookmark): Child | undefined {
   if (bookmark.queue.length === 0) return undefined;
   return bookmark.queue[clampIndex(bookmark.currentIndex, bookmark.queue.length)];
-}
-
-/** Cover-art value for a bookmark — its current track's resolved cover. */
-export function bookmarkCoverArtId(bookmark: PlayQueueBookmark): string | undefined {
-  const track = bookmarkCurrentTrack(bookmark);
-  if (!track) return undefined;
-  return resolveSongCoverArt(track);
 }
 
 /** 1-based queue position, e.g. { index: 25, total: 40 } → "25/40". */

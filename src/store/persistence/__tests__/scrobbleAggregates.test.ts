@@ -181,6 +181,20 @@ describe('analytics totals over a repeat-heavy history', () => {
   });
 });
 
+it("album counts carry the album's own cover, not a scrobbled track's", async () => {
+  db().runSync('DELETE FROM albums');
+  db().runSync("INSERT INTO albums (id, cover_art) VALUES ('al-a', 'al-a_hash')");
+  insert('e1', song('s1', { album: 'AlbA', artist: 'A', albumId: 'al-a', coverArt: 'dc-a:1_x' } as any), NOW);
+  insert('e2', song('s2', { album: 'AlbB', artist: 'B', albumId: 'al-unknown', coverArt: 'mf-s2' } as any), NOW);
+
+  const { aggregates } = await computeScrobbleAnalytics(0);
+
+  expect(aggregates.albumCounts['AlbA::A'].coverArt).toBe('al-a_hash');
+  // An album the library doesn't hold keeps the scrobbled cover rather than none.
+  expect(aggregates.albumCounts['AlbB::B'].coverArt).toBe('mf-s2');
+  db().runSync('DELETE FROM albums');
+});
+
 it('loadRecentScrobbles returns newest first, bounded', async () => {
   insert('a', song('s1'), NOW);
   insert('b', song('s2'), NOW + HOUR);

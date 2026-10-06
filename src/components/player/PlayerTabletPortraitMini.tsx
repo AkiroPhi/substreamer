@@ -13,7 +13,6 @@ import WaveformLogo from '@/components/WaveformLogo';
 import { type ThemeColors } from '@/constants/theme';
 import { useCanSkip } from '@/hooks/useCanSkip';
 import { useImagePalette } from '@/hooks/useImagePalette';
-import { useSongCoverArt } from '@/hooks/useSongCoverArt';
 import { useTheme } from '@/hooks/useTheme';
 import { retryPlayback, seekTo, skipToNext, skipToPrevious, togglePlayPause } from '@/services/playerService';
 import { playerStore } from '@/store/playerStore';
@@ -43,7 +42,8 @@ export function PlayerTabletPortraitMini() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const currentTrack = playerStore((s) => s.currentTrack);
-  const songCoverArtId = useSongCoverArt(currentTrack);
+  const songCoverArtId = currentTrack?.coverArt ?? undefined;
+  const songAlbumId = currentTrack?.albumId;
   const queueLoading = playerStore((s) => s.queueLoading);
 
   const router = useRouter();
@@ -60,7 +60,7 @@ export function PlayerTabletPortraitMini() {
   }, []);
 
   // Colour extraction (theme-aware; primary is the dominant/vibrant cover colour).
-  const { primary, gradientOpacity } = useImagePalette(songCoverArtId);
+  const { primary, gradientOpacity } = useImagePalette(songCoverArtId, songAlbumId);
   const gradientAnimatedStyle = useAnimatedStyle(() => ({
     opacity: gradientOpacity.value,
   }));
@@ -111,6 +111,7 @@ export function PlayerTabletPortraitMini() {
             ) : (
               <CachedImage
                 coverArtId={songCoverArtId}
+                albumId={songAlbumId}
                 size={300}
                 style={styles.cover}
                 resizeMode="cover"

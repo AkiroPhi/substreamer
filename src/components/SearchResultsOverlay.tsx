@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { CachedImage } from './CachedImage';
-import { useSongCoverArt } from '../hooks/useSongCoverArt';
 import { useTheme } from '../hooks/useTheme';
 import { playTrack } from '../services/playerService';
 import {
@@ -170,13 +169,12 @@ function CompactSongRow({
   unknownArtistLabel: string;
   onPress: () => void;
 }) {
-  const songCoverArtId = useSongCoverArt(song);
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.compactRow, pressed && styles.pressed]}
     >
-      <CachedImage coverArtId={songCoverArtId} size={COVER_SIZE} style={styles.compactCover} resizeMode="cover" />
+      <CachedImage coverArtId={song.coverArt} albumId={song.albumId} size={COVER_SIZE} style={styles.compactCover} resizeMode="cover" />
       <View style={styles.compactText}>
         <Text style={[styles.compactPrimary, { color: colors.textPrimary }]} numberOfLines={1}>
           {song.title}

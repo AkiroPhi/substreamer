@@ -22,7 +22,11 @@ export interface CoverImageRow {
   ext: string | null;
 }
 
-const ALBUM_TOKEN = `COALESCE(NULLIF(a.cover_art, ''), NULLIF(ca.cover_art, ''))`;
+/**
+ * An album's own cover token as SQL: the library row, then the downloaded album's metadata. Join
+ * `albums a` and `cached_albums ca` on the album id to use it.
+ */
+export const ALBUM_COVER_TOKEN_SQL = `COALESCE(NULLIF(a.cover_art, ''), NULLIF(ca.cover_art, ''))`;
 
 /**
  * Resolve each lookup's token and list its cached variants, in ONE query. A lookup with several
@@ -40,7 +44,7 @@ export async function coverTokensWithImages(
               NULLIF(json_extract(value, '$.a'), '') AS album_id
          FROM json_each(?)
      ), t AS (
-       SELECT s.i, COALESCE(${ALBUM_TOKEN}, s.song) AS token
+       SELECT s.i, COALESCE(${ALBUM_COVER_TOKEN_SQL}, s.song) AS token
          FROM s
          LEFT JOIN albums a ON a.id = s.album_id
          LEFT JOIN cached_albums ca ON ca.item_id = s.album_id
@@ -60,7 +64,7 @@ export async function albumCoverTokens(
   const ids = [...new Set(albumIds.filter(Boolean))];
   if (ids.length === 0) return new Map();
   const rows = await db.getAllAsync<{ id: string; token: string | null }>(
-    `SELECT j.value AS id, ${ALBUM_TOKEN} AS token
+    `SELECT j.value AS id, ${ALBUM_COVER_TOKEN_SQL} AS token
        FROM json_each(?) j
        LEFT JOIN albums a ON a.id = j.value
        LEFT JOIN cached_albums ca ON ca.item_id = j.value`,

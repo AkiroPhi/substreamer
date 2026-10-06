@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { CachedImage } from './CachedImage';
 import { useTheme } from '../hooks/useTheme';
 import {
-  bookmarkCoverArtId,
+  bookmarkCurrentTrack,
   bookmarkQueuePosition,
   bookmarkTimes,
   restoreBookmark,
@@ -26,11 +26,11 @@ export const BookmarkCard = memo(function BookmarkCard({
   const { t } = useTranslation();
 
   // Whole-queue math walks the entire stored queue; compute once per bookmark.
-  const { coverArtId, trackLine, remainingLine } = useMemo(() => {
+  const { track, trackLine, remainingLine } = useMemo(() => {
     const pos = bookmarkQueuePosition(bookmark);
     const times = bookmarkTimes(bookmark);
     return {
-      coverArtId: bookmarkCoverArtId(bookmark),
+      track: bookmarkCurrentTrack(bookmark),
       trackLine: t('bookmarkTrackOf', { index: pos.index, total: pos.total }),
       remainingLine: t('bookmarkRemaining', {
         remaining: formatCompactDuration(times.remainingSec),
@@ -51,7 +51,8 @@ export const BookmarkCard = memo(function BookmarkCard({
     >
       <View style={[styles.tile, { backgroundColor: colors.card }, width != null && { width }]}>
         <CachedImage
-          coverArtId={coverArtId}
+          coverArtId={track?.coverArt}
+          albumId={track?.albumId}
           size={COVER_SIZE}
           style={styles.cover}
           resizeMode="cover"

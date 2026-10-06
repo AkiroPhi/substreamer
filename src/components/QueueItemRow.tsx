@@ -9,7 +9,6 @@ import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 import { useDownloadStatus } from '../hooks/useDownloadStatus';
 import { useIsStarred } from '../hooks/useIsStarred';
 import { useRating } from '../hooks/useRating';
-import { useSongCoverArt } from '../hooks/useSongCoverArt';
 import { removeItemFromQueue, toggleStar } from '../services/moreOptionsService';
 import { type Child } from '../services/subsonicService';
 import { addToPlaylistStore } from '../store/addToPlaylistStore';
@@ -59,7 +58,6 @@ export const QueueItemRow = memo(function QueueItemRow({
   }, [onLongPress, track]);
 
   const { t } = useTranslation();
-  const songCoverArtId = useSongCoverArt(track);
   const starred = useIsStarred('song', track.id);
   const downloadStatus = useDownloadStatus('song', track.id);
   const rating = useRating(track.id, track.userRating);
@@ -127,7 +125,8 @@ export const QueueItemRow = memo(function QueueItemRow({
         {/* Cover art with now-playing overlay */}
         <View style={styles.coverWrap}>
           <CachedImage
-            coverArtId={songCoverArtId}
+            coverArtId={track.coverArt}
+            albumId={track.albumId}
             size={50}
             style={styles.cover}
             resizeMode="cover"

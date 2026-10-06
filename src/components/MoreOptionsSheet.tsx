@@ -22,7 +22,6 @@ import { useDownloadStatus, type DownloadStatus } from '../hooks/useDownloadStat
 import { useIsStarred } from '../hooks/useIsStarred';
 import { useRating } from '../hooks/useRating';
 import { useTheme } from '../hooks/useTheme';
-import { resolveEntityCoverArt } from '../hooks/useSongCoverArt';
 import { tabletLayoutStore } from '../store/tabletLayoutStore';
 import {
   addAlbumToQueue,
@@ -42,6 +41,7 @@ import {
   songItemId,
   toggleStar,
 } from '../services/moreOptionsService';
+import { resolveCoverArtId, type CoverSubject } from '../services/imageCacheService';
 import { deleteCachedItem } from '../services/musicCacheService';
 import {
   deletePlaylist,
@@ -110,10 +110,11 @@ function getSubtitle(entity: MoreOptionsEntity, t: (key: string, options?: Recor
   }
 }
 
-function getCoverArtId(entity: MoreOptionsEntity): string | undefined {
-  // Cover-art lookups use the entity's `coverArt` value (mode-aware for songs).
-  // The single rule lives in src/utils/coverArtId.ts.
-  return resolveEntityCoverArt(entity.item);
+/** What the entity's cover resolves from: a song also carries its album, for album cover mode. */
+function coverSubject(entity: MoreOptionsEntity): CoverSubject {
+  return entity.type === 'song'
+    ? { coverArt: entity.item.coverArt, albumId: entity.item.albumId }
+    : { coverArt: entity.item.coverArt };
 }
 
 function isStarrable(entity: MoreOptionsEntity): boolean {
@@ -379,7 +380,7 @@ export function MoreOptionsSheet() {
       const resolvedMbid = (db ? (await getArtistBioRow(db, artistId))?.resolvedMbid : null) ?? null;
       const currentMbid = override?.mbid ?? resolvedMbid;
       await moreOptionsStore.getState().hideAndAwait();
-      mbidSearchStore.getState().showArtist(artistId, artistName, currentMbid, resolveEntityCoverArt(entity.item));
+      mbidSearchStore.getState().showArtist(artistId, artistName, currentMbid, entity.item.coverArt ?? undefined);
     } else if (entity.type === 'album') {
       const album = entity.item as AlbumID3;
       const override = getOverride(mbidOverrideStore.getState().overrides, 'album', album.id);
@@ -513,11 +514,12 @@ export function MoreOptionsSheet() {
 
   const handleShare = useCallback(async () => {
     if (!entity) return;
+    const coverArtId = await resolveCoverArtId(coverSubject(entity));
     await moreOptionsStore.getState().hideAndAwait();
     if (entity.type === 'album') {
-      createShareStore.getState().showAlbum(entity.item.id, entity.item.name, entity.item.artist, resolveEntityCoverArt(entity.item));
+      createShareStore.getState().showAlbum(entity.item.id, entity.item.name, entity.item.artist, coverArtId);
     } else if (entity.type === 'playlist') {
-      createShareStore.getState().showPlaylist(entity.item.id, entity.item.name, resolveEntityCoverArt(entity.item));
+      createShareStore.getState().showPlaylist(entity.item.id, entity.item.name, coverArtId);
     } else if (entity.type === 'song') {
       // Subsonic createShare accepts a single song/mediafile id; Navidrome maps
       // it to ResourceType="media_file" and other servers behave the same.
@@ -526,16 +528,15 @@ export function MoreOptionsSheet() {
         song.id,
         song.title,
         song.artist ?? undefined,
-        resolveEntityCoverArt(song),
+        coverArtId,
       );
     }
   }, [entity]);
 
   const handleSetRating = useCallback(async () => {
     if (!entity || !isRatable(entity)) return;
-    // `coverArt`-value based (see src/utils/coverArtId.ts): songs resolve mode-aware
-    // so the mini player and the rating sheet share one cache entry.
-    const coverArtId = resolveEntityCoverArt(entity.item);
+    // The same cover the rest of the app shows for this entity.
+    const coverArtId = await resolveCoverArtId(coverSubject(entity));
     await moreOptionsStore.getState().hideAndAwait();
     setRatingStore.getState().show(
       entity.type as 'song' | 'album' | 'artist',
@@ -717,8 +718,14 @@ export function MoreOptionsSheet() {
           <>
               {/* Title / Subtitle */}
               <View style={styles.sheetHeader}>
-                {getCoverArtId(entity) && (
-                  <CachedImage coverArtId={getCoverArtId(entity)!} size={150} style={styles.sheetCoverArt} resizeMode="cover" />
+                {(coverSubject(entity).coverArt || coverSubject(entity).albumId) && (
+                  <CachedImage
+                    coverArtId={coverSubject(entity).coverArt ?? undefined}
+                    albumId={coverSubject(entity).albumId}
+                    size={150}
+                    style={styles.sheetCoverArt}
+                    resizeMode="cover"
+                  />
                 )}
                 <View style={styles.sheetHeaderText}>
                   <Text

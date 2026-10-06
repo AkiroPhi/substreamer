@@ -2042,7 +2042,7 @@ export function syncCachedItemTracks(
   syncCachedPlaylistTracks(itemId, newTrackIds);
 
   // Cover-art reconciliation for this offline item only — never the full library.
-  // `ensureCached` / `prefetchCoverArt` are idempotent: an instant no-op when every
+  // `ensureCached` / `cacheSongCovers` are idempotent: an instant no-op when every
   // variant is on disk, refilling only what is missing (a variant dropped by the
   // reconcileImageCache zero-byte pass, or an OS cache eviction).
   if (cached.coverArtId) {

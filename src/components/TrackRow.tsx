@@ -10,7 +10,6 @@ import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 import { useDownloadStatus } from '../hooks/useDownloadStatus';
 import { useIsStarred } from '../hooks/useIsStarred';
 import { useRating } from '../hooks/useRating';
-import { useSongCoverArt } from '../hooks/useSongCoverArt';
 import { addSongToQueue, toggleStar } from '../services/moreOptionsService';
 import { playTrack } from '../services/playerService';
 import { addToPlaylistStore } from '../store/addToPlaylistStore';
@@ -55,7 +54,6 @@ export const TrackRow = memo(function TrackRow({ track, trackNumber, colors, onP
   // Selects a boolean, not the track: non-active rows then re-render only when
   // currentTrack moves to or from this row, not on every track change.
   const isActive = playerStore((s) => s.currentTrack?.id === track.id);
-  const songCoverArtId = useSongCoverArt(track);
   // Offline, a track that isn't fully cached is inert — tapping it would route to the
   // first playable track in the queue with no on-screen signal why. 'complete' is true
   // exactly when getLocalTrackUri(id) is non-null, the same predicate
@@ -141,7 +139,8 @@ export const TrackRow = memo(function TrackRow({ track, trackNumber, colors, onP
         {showCoverArt ? (
           <View style={styles.coverWrap}>
             <CachedImage
-              coverArtId={songCoverArtId}
+              coverArtId={track.coverArt}
+              albumId={track.albumId}
               size={COVER_SIZE}
               style={styles.cover}
               resizeMode="cover"

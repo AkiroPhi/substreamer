@@ -15,7 +15,6 @@ import {
   restoreBookmark,
   bookmarkTimes,
   bookmarkQueuePosition,
-  bookmarkCoverArtId,
   bookmarkCurrentTrack,
 } from '../bookmarkService';
 import { playTrack, seekTo } from '../playerService';
@@ -112,18 +111,6 @@ describe('derived display helpers', () => {
   it('clamps an out-of-range index', () => {
     const b = bookmark({ queue: [track('a'), track('b')], currentIndex: 9 });
     expect(bookmarkQueuePosition(b)).toEqual({ index: 2, total: 2 });
-  });
-
-  it('resolves the current track cover via the song coverArt value', () => {
-    // Album mode, album not in the (empty) library → falls back to the song's coverArt.
-    expect(
-      bookmarkCoverArtId(bookmark({ queue: [track('t', { albumId: 'al', coverArt: 'cov-al' })], currentIndex: 0 })),
-    ).toBe('cov-al');
-    expect(
-      bookmarkCoverArtId(bookmark({ queue: [track('t', { coverArt: 'cov-t' })], currentIndex: 0 })),
-    ).toBe('cov-t');
-    // No coverArt anywhere → undefined (never the entity id).
-    expect(bookmarkCoverArtId(bookmark({ queue: [track('t')], currentIndex: 0 }))).toBeUndefined();
   });
 
   it('returns the clamped current track, undefined for empty queue', () => {

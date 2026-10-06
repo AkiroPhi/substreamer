@@ -40,6 +40,9 @@ const mockIsRemoteFailed = jest.fn<boolean, [string]>();
 const mockBuildRemoteImageUrl = jest.fn<string | null, [string, number]>();
 
 let cacheUpdateListener: (() => void) | null = null;
+let subscribedId: string | null = null;
+// Album mode: a song subject resolves to its album's token when the album is known.
+const mockAlbumTokens: Record<string, string> = {};
 
 jest.mock('../../services/imageCacheService', () => ({
   resolveCachedImageUri: (id: string, size: number) =>
@@ -48,11 +51,11 @@ jest.mock('../../services/imageCacheService', () => ({
   // offline + remote-failed) by composing the mocked primitives, so the tests'
   // existing per-primitive setups still drive CachedImage's render branches.
   resolveDisplayImage: async (
-    subject: { coverArt?: string | null },
+    subject: { coverArt?: string | null; albumId?: string | null },
     size: number,
     opts: { offline: boolean; skipCache?: boolean },
   ) => {
-    const id = subject.coverArt ?? undefined;
+    const id = (subject.albumId && mockAlbumTokens[subject.albumId]) || subject.coverArt || undefined;
     if (!id) return { coverArtId: undefined, uri: null, isRemote: false };
     if (!opts.skipCache) {
       const cached = mockGetCachedImageUri(id, size);
@@ -67,7 +70,8 @@ jest.mock('../../services/imageCacheService', () => ({
   reportBadRemote: (id: string) => mockReportBadRemote(id),
   isRemoteFailed: (id: string) => mockIsRemoteFailed(id),
   buildRemoteImageUrl: (id: string, size: number) => mockBuildRemoteImageUrl(id, size),
-  subscribeImageCacheUpdate: (_id: string, listener: () => void) => {
+  subscribeImageCacheUpdate: (id: string, listener: () => void) => {
+    subscribedId = id;
     cacheUpdateListener = listener;
     return () => { cacheUpdateListener = null; };
   },
@@ -162,7 +166,11 @@ function resetMocks(): void {
   );
 }
 
-beforeEach(resetMocks);
+beforeEach(() => {
+  resetMocks();
+  for (const k of Object.keys(mockAlbumTokens)) delete mockAlbumTokens[k];
+  subscribedId = null;
+});
 
 /** Find the Image layer in the rendered tree (if any). The placeholder
  *  is a View with testID; the Image is the only Image element in the
@@ -407,5 +415,52 @@ describe('id changes', () => {
     tree.rerender(<CachedImage coverArtId="xyz" size={150} />);
     await flush();
     expect(findImage(tree)?.uri).toBe('file:///cache/xyz/150.jpg');
+  });
+});
+
+describe('song subject (coverArtId + albumId)', () => {
+  it("shows the album's cover and keys every report and subscription on its token", async () => {
+    mockAlbumTokens.alb1 = 'al-alb1_h';
+    mockGetCachedImageUri.mockImplementation((id) => (id === 'al-alb1_h' ? 'file:///cache/al/150.jpg' : null));
+    const tree = render(<CachedImage coverArtId="dc-alb1:1_x" albumId="alb1" size={150} />);
+    await flush();
+
+    expect(findImage(tree)?.uri).toBe('file:///cache/al/150.jpg');
+    expect(subscribedId).toBe('al-alb1_h');
+
+    const img = tree.UNSAFE_queryAllByType(RNImage)[0];
+    await act(async () => { img.props.onError(); await Promise.resolve(); await Promise.resolve(); });
+    expect(mockReportBadCache).toHaveBeenCalledWith('al-alb1_h', 150);
+  });
+
+  it("caches the resolved album token on a miss, not the song's own", async () => {
+    mockAlbumTokens.alb1 = 'al-alb1_h';
+    render(<CachedImage coverArtId="dc-alb1:1_x" albumId="alb1" size={150} />);
+    await flush();
+    expect(mockEnsureCached).toHaveBeenCalledWith('al-alb1_h');
+    expect(mockEnsureCached).not.toHaveBeenCalledWith('dc-alb1:1_x');
+  });
+
+  it('a recycled cell given another song drops the previous cover at once', async () => {
+    mockAlbumTokens.alb1 = 'al-alb1_h';
+    mockAlbumTokens.alb2 = 'al-alb2_h';
+    mockGetCachedImageUri.mockImplementation((id) => `file:///cache/${id}/150.jpg`);
+    const tree = render(<CachedImage coverArtId="dc-1" albumId="alb1" size={150} />);
+    await flush();
+    expect(findImage(tree)?.uri).toBe('file:///cache/al-alb1_h/150.jpg');
+
+    tree.rerender(<CachedImage coverArtId="dc-2" albumId="alb2" size={150} />);
+    // Before the new resolve lands: no image from the previous song.
+    expect(findImage(tree)).toBeNull();
+    await flush();
+    expect(findImage(tree)?.uri).toBe('file:///cache/al-alb2_h/150.jpg');
+    expect(subscribedId).toBe('al-alb2_h');
+  });
+
+  it('falls back to the song cover when its album is unknown', async () => {
+    mockGetCachedImageUri.mockImplementation((id) => `file:///cache/${id}/150.jpg`);
+    const tree = render(<CachedImage coverArtId="dc-9" albumId="missing" size={150} />);
+    await flush();
+    expect(findImage(tree)?.uri).toBe('file:///cache/dc-9/150.jpg');
   });
 });
