@@ -8,12 +8,19 @@ jest.mock('../detailFetchService', () => ({
   fetchPlaylistDetail: jest.fn(),
 }));
 
-import { __test, installHeadlessMediaService } from '../headlessMediaService';
+import {
+  __test,
+  installHeadlessMediaService,
+  refreshHeadlessMediaSnapshot,
+} from '../headlessMediaService';
+import * as imageCacheService from '../imageCacheService';
 import {
   sectionId,
   listId,
   albumId,
   azLetterId,
+  azBucketId,
+  albumTrackId,
   favTrackId,
   playlistId,
 } from '../headlessMediaService.helpers';
@@ -704,5 +711,156 @@ describe('a pending Navidrome re-key behaves as offline, not as broken', () => {
     // The same node the internal resolver serves — i.e. no blanket refusal in the
     // handler layer.
     expect(rows).toEqual(await __test.resolveBrowseChildren(node));
+  });
+});
+
+describe('row artwork', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('resolves album artwork by its coverArt value through the shared resolver', async () => {
+    const resolve = jest
+      .spyOn(imageCacheService, 'resolveDisplayImage')
+      .mockResolvedValueOnce({ coverArtId: 'cov-a', uri: 'file:///cov-a.jpg', isRemote: false });
+    albumListsStore.setState({
+      recentlyAdded: [{ ...album('al-a', 'Abbey Road'), coverArt: 'cov-a' }, album('al-z', 'Zooropa')],
+    } as any);
+
+    const rows = await __test.resolveBrowseChildren(listId('recentlyAdded'));
+
+    expect(rows.map((r) => r.artworkUrl)).toEqual(['file:///cov-a.jpg', undefined]);
+    // Keyed off the coverArt token, never the album id; an album with no token skips it.
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith({ coverArt: 'cov-a' }, 300, { offline: false });
+  });
+
+  it('leaves the artwork unset when the resolver has no image for the token', async () => {
+    jest
+      .spyOn(imageCacheService, 'resolveDisplayImage')
+      .mockResolvedValueOnce({ coverArtId: 'cov-a', uri: null, isRemote: false });
+    albumListsStore.setState({
+      recentlyAdded: [{ ...album('al-a', 'Abbey Road'), coverArt: 'cov-a' }],
+    } as any);
+
+    const rows = await __test.resolveBrowseChildren(listId('recentlyAdded'));
+
+    expect(rows[0].artworkUrl).toBeUndefined();
+  });
+});
+
+describe('resolveBrowseChildren — remaining node kinds', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('azBucket → only the albums whose second letter falls in the bucket', async () => {
+    await upsertAlbums(db(), [album('al-ace', 'Ace'), album('al-azt', 'Aztec Camera')]);
+    const rows = await __test.resolveBrowseChildren(azBucketId('A', 'a', 'c'));
+    expect(rows.map((r) => r.id).sort()).toEqual([albumId('al-a'), albumId('al-ace')]);
+    expect(rows.every((r) => r.hasChildren && !r.playable)).toBe(true);
+  });
+
+  it('a section or unknown id has no browse children', async () => {
+    expect(await __test.resolveBrowseChildren(sectionId('home'))).toEqual([]);
+    expect(await __test.resolveBrowseChildren('bogus')).toEqual([]);
+  });
+
+  it('an album whose detail fetch fails lists nothing, and logs the failure', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = new Error('network down');
+    (fetchAlbumDetail as jest.Mock).mockRejectedValueOnce(err);
+
+    expect(await __test.resolveBrowseChildren(albumId('al-a'))).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('[headlessMediaService] fetchAlbum(al-a) failed:', err);
+  });
+
+  it('a playlist whose detail fetch fails lists nothing, and logs the failure', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = new Error('network down');
+    (fetchPlaylistDetail as jest.Mock).mockRejectedValueOnce(err);
+
+    expect(await __test.resolveBrowseChildren(playlistId('p1'))).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('[headlessMediaService] fetchPlaylist(p1) failed:', err);
+  });
+});
+
+describe('resolvePlayback — album tracks', () => {
+  it('track:album:<id>:<i> → the album queue starting at that track, no source playlist', async () => {
+    (fetchAlbumDetail as jest.Mock).mockResolvedValueOnce({ song: [song('s1'), song('s2')] });
+    const r = await __test.resolvePlayback(albumTrackId('al-a', 1));
+    expect(r.queue.map((c) => c.id)).toEqual(['s1', 's2']);
+    expect(r.startIndex).toBe(1);
+    expect(r.sourcePlaylistId).toBeNull();
+  });
+
+  it('an index past the end of the album (it changed since browse) starts at track 0', async () => {
+    (fetchAlbumDetail as jest.Mock).mockResolvedValueOnce({ song: [song('s1'), song('s2')] });
+    const r = await __test.resolvePlayback(albumTrackId('al-a', 9));
+    expect(r.queue).toHaveLength(2);
+    expect(r.startIndex).toBe(0);
+  });
+});
+
+describe('pushSnapshot — failure handling', () => {
+  const tp = require('react-native-queue-player').getTrackPlayer();
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    tp.setBrowseSnapshot.mockReset();
+    tp.donateVoiceVocabulary.mockReset();
+  });
+
+  it('logs a failed snapshot push instead of throwing', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = new Error('native rejected');
+    tp.setBrowseSnapshot.mockImplementationOnce(() => {
+      throw err;
+    });
+
+    await expect(__test.pushSnapshot()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith('[headlessMediaService] pushSnapshot failed:', err);
+  });
+
+  it('logs a failed vocabulary donation instead of throwing, after the snapshot went out', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = new Error('SiriKit unavailable');
+    tp.donateVoiceVocabulary.mockImplementationOnce(() => {
+      throw err;
+    });
+
+    await expect(__test.pushSnapshot()).resolves.toBeUndefined();
+    expect(tp.setBrowseSnapshot).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[headlessMediaService] donateVoiceVocabulary failed:', err);
+  });
+
+  it('refreshHeadlessMediaSnapshot pushes the snapshot when a car is connected', async () => {
+    refreshHeadlessMediaSnapshot();
+    await flushAsync();
+    expect(tp.setBrowseSnapshot).toHaveBeenCalledTimes(1);
+    expect(tp.setBrowseSnapshot.mock.calls[0][0].rootId).toBe('root');
+  });
+});
+
+describe('__test.reset with a refresh pending', () => {
+  const tp = require('react-native-queue-player').getTrackPlayer();
+
+  beforeEach(() => {
+    __test.reset();
+    jest.useFakeTimers();
+    tp.isCarConnected.mockReturnValue(true);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    __test.reset();
+    tp.setBrowseSnapshot.mockClear();
+  });
+
+  it('cancels the armed refresh so it never fires into the next test', async () => {
+    installHeadlessMediaService();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(tp.setBrowseSnapshot).toHaveBeenCalled();
+    tp.setBrowseSnapshot.mockClear();
+
+    favoritesStore.setState({ songIds: new Set(['s2']) } as any);
+    __test.reset();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(tp.setBrowseSnapshot).not.toHaveBeenCalled();
   });
 });
