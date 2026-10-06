@@ -57,6 +57,7 @@ import {
   readDownloadQueueSongRefsAsync,
   readDownloadQueueSongsAsync,
   readQueuedSongStatus,
+  UNKNOWN_ALBUM_ID,
   type CachedSongBytesUpdate,
 } from '../store/persistence/musicCacheTables';
 import { logImageCache } from './imageCacheLogger';
@@ -87,7 +88,7 @@ import { albumCoverArtById, resolveSongCoverArt } from '../hooks/useSongCoverArt
 /* ------------------------------------------------------------------ */
 
 export const CACHE_DIR_NAME = 'music-cache';
-export const UNKNOWN_ALBUM_ID = '_unknown';
+export { UNKNOWN_ALBUM_ID };
 
 /**
  * Hook invoked when an album is enqueued for download and the library cache

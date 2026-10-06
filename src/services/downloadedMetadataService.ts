@@ -17,6 +17,7 @@ import { downloadedMetadataRefreshStore } from '../store/downloadedMetadataRefre
 import { musicCacheStore } from '../store/musicCacheStore';
 import { offlineModeStore } from '../store/offlineModeStore';
 import { getDb } from '../store/persistence/db';
+import { UNKNOWN_ALBUM_ID } from '../store/persistence/musicCacheTables';
 import { albumIdsWithSongs } from '../db/repository/songs';
 import { playlistIdsWithSongs } from '../db/repository/playlists';
 import { runPool } from '../utils/promisePool';
@@ -60,8 +61,10 @@ export async function refreshDownloadedMetadata(opts: {
     else if (item.type === 'song' && item.parentAlbumId) albumIds.add(item.parentAlbumId);
     else if (item.type === 'favorites') {
       for (const songId of item.songIds ?? []) {
-        const parent = cachedSongs[songId]?.albumId;
-        if (parent) albumIds.add(parent);
+        // `albumId` on a cached song is the file's directory; the server album is `srcAlbumId`.
+        const song = cachedSongs[songId];
+        const parent = song?.srcAlbumId ?? song?.albumId;
+        if (parent && parent !== UNKNOWN_ALBUM_ID) albumIds.add(parent);
       }
     }
   }

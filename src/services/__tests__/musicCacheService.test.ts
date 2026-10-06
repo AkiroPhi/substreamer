@@ -192,6 +192,7 @@ jest.mock('../../store/persistence/musicCacheTables', () => {
   const queueSongs = new Map<string, Array<Record<string, unknown>>>();
   const isDerived = (itemId: string) => derivedItems.has(itemId);
   return {
+    UNKNOWN_ALBUM_ID: actual.UNKNOWN_ALBUM_ID,
     // Hydrate helpers — return empty; tests seed in-memory state directly.
     hydrateCachedSongs: jest.fn(() => ({})),
     hydrateCachedItems: jest.fn(() => ({})),

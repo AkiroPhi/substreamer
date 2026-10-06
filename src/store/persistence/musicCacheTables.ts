@@ -41,6 +41,9 @@ import { albumSortKeys, playlistSortTitle, songSortKeys } from '@/db/sortKeys';
 
 import { getDb, type BatchCommand, type InternalDb } from './db';
 
+/** The `album_id` directory of a downloaded song the server gave no album. */
+export const UNKNOWN_ALBUM_ID = '_unknown';
+
 // The `Child` ⇄ columns mapping is shared with the other snapshot tables; re-exported
 // so the download-side consumers keep one import.
 export { childGenreNames };

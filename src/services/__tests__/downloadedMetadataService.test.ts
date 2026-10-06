@@ -18,7 +18,7 @@ const mockRefreshState = {
 };
 const mockCacheState = {
   cachedItems: {} as Record<string, { type: string; parentAlbumId?: string; songIds?: string[] }>,
-  cachedSongs: {} as Record<string, { id: string; albumId?: string | null }>,
+  cachedSongs: {} as Record<string, { id: string; albumId?: string | null; srcAlbumId?: string }>,
 };
 const mockAlbumState = { albums: {} as Record<string, unknown> };
 const mockPlaylistState = { playlists: {} as Record<string, unknown> };
@@ -168,5 +168,20 @@ describe('refreshDownloadedMetadata — outcome shape', () => {
     expect(out).toEqual({ attempted: 2, remaining: 0 });
     expect(mockFetchAlbum).toHaveBeenCalledWith('albA', { prefetchCovers: true, force: false });
     expect(mockFetchAlbum).toHaveBeenCalledWith('albB', { prefetchCovers: true, force: false });
+  });
+
+  it('resolves a favorite to its SERVER album, not the file directory', async () => {
+    // `albumId` on a cached song is the file's directory; `srcAlbumId` is the server album.
+    mockCacheState.cachedItems = { __starred__: { type: 'favorites', songIds: ['s1', 's2'] } };
+    mockCacheState.cachedSongs = {
+      s1: { id: 's1', albumId: 'old-dir', srcAlbumId: 'albA' },
+      s2: { id: 's2', albumId: '_unknown', srcAlbumId: 'albB' },
+    };
+    const out = await refreshDownloadedMetadata({ mode: 'missing' });
+    expect(out).toEqual({ attempted: 2, remaining: 0 });
+    expect(mockFetchAlbum).toHaveBeenCalledWith('albA', { prefetchCovers: true, force: false });
+    expect(mockFetchAlbum).toHaveBeenCalledWith('albB', { prefetchCovers: true, force: false });
+    expect(mockFetchAlbum).not.toHaveBeenCalledWith('old-dir', expect.anything());
+    expect(mockFetchAlbum).not.toHaveBeenCalledWith('_unknown', expect.anything());
   });
 });
