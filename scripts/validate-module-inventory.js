@@ -7,6 +7,9 @@
  *
  * Errors (fail CI):
  *  - jest.config.js references a `modules/<name>/...` file that doesn't exist
+ *  - a module calls `requireNativeModule('<Name>')` but has no `mocks/<Name>.ts`. jest-expo
+ *    loads that file as the native module in every test, so suites need no per-suite mock and
+ *    print no "Native module not found" warning.
  *
  * Warnings (do not fail CI):
  *  - A module has tests but isn't represented in `collectCoverageFrom`
@@ -39,6 +42,29 @@ function main() {
     if (!fs.existsSync(fullPath)) {
       console.error(`[validate-module-inventory] jest.config.js references missing file: ${entry}`);
       errors++;
+    }
+  }
+
+  // ERROR: a native module without the jest-expo mock
+  const modulesDir = path.join(REPO_ROOT, 'modules');
+  for (const name of fs.readdirSync(modulesDir)) {
+    const srcDir = path.join(modulesDir, name, 'src');
+    if (!fs.existsSync(srcDir)) continue;
+    for (const file of fs.readdirSync(srcDir)) {
+      if (!/\.tsx?$/.test(file)) continue;
+      const source = fs.readFileSync(path.join(srcDir, file), 'utf8');
+      for (const m of source.matchAll(/requireNativeModule\s*(?:<[^>]*>)?\s*\(\s*['"]([^'"]+)['"]/g)) {
+        const native = m[1];
+        const mock = ['ts', 'js'].some((ext) =>
+          fs.existsSync(path.join(modulesDir, name, 'mocks', `${native}.${ext}`)),
+        );
+        if (!mock) {
+          console.error(
+            `[validate-module-inventory] modules/${name} requires native '${native}' but has no mocks/${native}.ts`,
+          );
+          errors++;
+        }
+      }
     }
   }
 
