@@ -142,9 +142,11 @@ const mockCountByStatus = jest.fn((status: string) =>
 const mockCoverRows: Record<string, string[]> = {
   cached_albums: [], cached_playlists: [], cached_songs_cover_art: [], cached_songs_cover_art_id: [],
 };
+// False simulates a device with no database (getDb() returns null).
+let mockDbAvailable = true;
 jest.mock('../../store/persistence/db', () => ({
   isDbHealthy: () => true,
-  getDb: () => ({
+  getDb: () => (!mockDbAvailable ? null : {
     getAllSync: (sql: string) => {
       // Keyed by table+column: cached_songs is read twice, once per cover-art mode.
       const key = sql.includes('JOIN albums')
@@ -175,10 +177,15 @@ jest.mock('../../store/persistence/imageDownloadQueueTable', () => ({
 
 // kvStorage — back the meta with an in-test Map.
 const mockKvStore = new Map<string, string>();
+// When set, setItem throws this value — drives the meta-write failure path.
+let mockKvSetItemError: unknown = null;
 jest.mock('../../store/persistence/kvStorage', () => {
   const adapter = {
     getItem: (k: string) => mockKvStore.get(k) ?? null,
-    setItem: (k: string, v: string) => { mockKvStore.set(k, v); },
+    setItem: (k: string, v: string) => {
+      if (mockKvSetItemError !== null) throw mockKvSetItemError;
+      mockKvStore.set(k, v);
+    },
     removeItem: (k: string) => { mockKvStore.delete(k); },
   };
   // imageCacheService reads the queue-meta blob via the sync adapter; expose
@@ -242,6 +249,7 @@ import {
   resumeImageQueue,
   retryFailedImages,
 } from '../imageCacheService';
+import { logImageCache } from '../imageCacheLogger';
 
 __setImageDownloaderForTest(mockDownloader);
 
@@ -257,6 +265,8 @@ beforeEach(() => {
   mockHydrateCachedSongs.mockReturnValue({});
   mockGetAllCachedCoverArtIds.mockReturnValue([]);
   mockDownloaderShouldFail = false;
+  mockDbAvailable = true;
+  mockKvSetItemError = null;
   // Re-install the downloader stub — it may have been reset by
   // earlier tests calling __setImageDownloaderForTest(undefined).
   __setImageDownloaderForTest(mockDownloader);
@@ -683,5 +693,136 @@ describe('cover-art mode', () => {
 
     const [ids] = mockEnqueueBulk.mock.calls[0];
     expect(ids).toEqual(['al-same_hash']);
+  });
+});
+
+const META_KEY = 'substreamer-image-queue-meta';
+const logged = (text: string): boolean =>
+  (logImageCache as jest.Mock).mock.calls.some((c) => String(c[0]).includes(text));
+
+describe('refresh-downloads without a database', () => {
+  it('falls back to the downloaded songs\' own covers, deduped and skipping empty ones', async () => {
+    mockDbAvailable = false;
+    mockHydrateCachedItems.mockReturnValue({
+      a: { type: 'album', coverArtId: 'al-item' },
+      b: { type: 'playlist' },
+    });
+    mockHydrateCachedSongs.mockReturnValue({
+      s1: { coverArt: 'mf-one' },
+      s2: { coverArt: 'mf-one' },
+      s3: {},
+      s4: { coverArt: 'mf-two' },
+    });
+
+    await enqueueImageRefreshCycle('refresh-downloads');
+
+    const [ids] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toEqual(['mf-one', 'mf-two']);
+  });
+});
+
+describe('image-queue meta persistence', () => {
+  it('ignores an unknown persisted cycle scope', async () => {
+    mockKvStore.set(META_KEY, JSON.stringify({ cycleId: 'cyc-x', cycleScope: 'bogus', cycleTotal: 0 }));
+
+    const s = await getImageQueueState();
+
+    expect(s.cycleId).toBe('cyc-x');
+    expect(s.cycleScope).toBeNull();
+  });
+
+  it('logs a failed meta write instead of throwing (Error)', () => {
+    mockKvSetItemError = new Error('disk I/O');
+
+    expect(() => pauseImageQueue()).not.toThrow();
+
+    expect(mockKvStore.has(META_KEY)).toBe(false);
+    expect(logged('META WRITE FAILED (disk I/O)')).toBe(true);
+  });
+
+  it('logs a failed meta write instead of throwing (non-Error value)', () => {
+    mockKvSetItemError = 'locked';
+
+    expect(() => pauseImageQueue()).not.toThrow();
+
+    expect(logged('META WRITE FAILED (locked)')).toBe(true);
+  });
+});
+
+describe('pause / resume are idempotent', () => {
+  it('a second pause does not write or notify again', () => {
+    pauseImageQueue();
+    (logImageCache as jest.Mock).mockClear();
+
+    pauseImageQueue();
+
+    expect(logged('image-queue: paused')).toBe(false);
+  });
+
+  it('resume while not paused is a no-op and does not start the worker', async () => {
+    mockQueueState.rows.push({ coverArtId: 'cov-a', scope: 'refresh-all', status: 'queued', cycleId: 'cyc-1' });
+
+    resumeImageQueue();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(logged('image-queue: resumed')).toBe(false);
+    expect(mockMarkDownloading).not.toHaveBeenCalled();
+  });
+});
+
+describe('worker stops mid-drain', () => {
+  it('stops picking rows once the queue is paused', async () => {
+    mockGetAllCachedCoverArtIds.mockReturnValue(['cov-a', 'cov-b']);
+    mockDownloader.mockImplementationOnce(async () => { pauseImageQueue(); });
+    await enqueueImageRefreshCycle('refresh-all');
+    await processImageQueue();
+
+    expect(mockMarkDownloading).toHaveBeenCalledTimes(1);
+    expect(mockQueueState.rows.map((r) => r.coverArtId)).toEqual(['cov-b']);
+    expect((await getImageQueueState()).isPaused).toBe(true);
+  });
+
+  it('stops picking rows once connectivity is lost', async () => {
+    mockGetAllCachedCoverArtIds.mockReturnValue(['cov-a', 'cov-b']);
+    mockDownloader.mockImplementationOnce(async () => { mockOfflineMode.offlineMode = true; });
+    await enqueueImageRefreshCycle('refresh-all');
+    await processImageQueue();
+
+    expect(mockMarkDownloading).toHaveBeenCalledTimes(1);
+    expect(mockQueueState.rows.map((r) => r.coverArtId)).toEqual(['cov-b']);
+  });
+});
+
+describe('retryFailedImages — nothing to retry, or already active', () => {
+  it('does not kick the worker when the cycle has no error rows', async () => {
+    mockQueueState.rows.push({ coverArtId: 'cov-a', scope: 'refresh-all', status: 'queued', cycleId: 'cyc-1' });
+    mockKvStore.set(META_KEY, JSON.stringify({ cycleId: 'cyc-1', cycleScope: 'refresh-all', cycleTotal: 1, phase: 'active' }));
+
+    await retryFailedImages();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockResetErrorForCycle).toHaveBeenCalledWith('cyc-1');
+    expect(mockMarkDownloading).not.toHaveBeenCalled();
+  });
+
+  it('keeps an active phase as-is while re-queueing error rows', async () => {
+    mockQueueState.rows.push({ coverArtId: 'cov-a', scope: 'refresh-all', status: 'error', cycleId: 'cyc-1' });
+    mockKvStore.set(META_KEY, JSON.stringify({ cycleId: 'cyc-1', cycleScope: 'refresh-all', cycleTotal: 1, phase: 'active' }));
+
+    await retryFailedImages();
+    await processImageQueue();
+
+    expect(mockMarkDownloading).toHaveBeenCalledWith('cov-a');
+    expect(mockQueueState.rows).toHaveLength(0);
+  });
+});
+
+describe('dismissImageCacheErrorBanner', () => {
+  it('is a no-op while the cycle is still active', async () => {
+    mockKvStore.set(META_KEY, JSON.stringify({ cycleId: 'cyc-1', cycleScope: 'refresh-all', cycleTotal: 1, phase: 'active' }));
+
+    dismissImageCacheErrorBanner();
+
+    expect((await getImageQueueState()).phase).toBe('active');
   });
 });

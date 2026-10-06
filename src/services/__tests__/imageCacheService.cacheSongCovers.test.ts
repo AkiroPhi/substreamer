@@ -87,3 +87,12 @@ it('skips covers already fully on disk', async () => {
 
   expect(fetchedTokens()).toEqual(['dc-alb1:1_x']);
 });
+
+it('skips the album lookup when no song has an album, and never fetches a bundled sentinel', async () => {
+  await cacheSongCovers([
+    { coverArt: 'mf-only', albumId: null },
+    { coverArt: '__starred_cover__', albumId: null },
+  ]);
+
+  expect(fetchedTokens()).toEqual(['mf-only']);
+});

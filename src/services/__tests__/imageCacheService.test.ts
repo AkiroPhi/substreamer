@@ -336,7 +336,16 @@ import {
   __resetRetryStateForTest,
   reportBadRemote,
   isRemoteFailed,
+  subscribeImageCacheUpdate,
+  retryRemoteImagesForServerSwitch,
+  scanImageCache,
 } from '../imageCacheService';
+import * as dbModule from '../../store/persistence/db';
+import { authStore } from '../../store/authStore';
+import { connectivityStore } from '../../store/connectivityStore';
+import { imageCacheStore } from '../../store/imageCacheStore';
+import { musicCacheStore } from '../../store/musicCacheStore';
+import { offlineModeStore } from '../../store/offlineModeStore';
 
 const { fetch: mockFetch } = jest.requireMock('expo/fetch') as { fetch: jest.Mock };
 
@@ -2101,5 +2110,372 @@ describe('reconcileImageCache — snapshot trust', () => {
 
     expect(mockDeleteCachedImageVariants).not.toHaveBeenCalled();
     expect(mockDbRows.has(mockDbKey('album2', 600))).toBe(true);
+  });
+});
+
+describe('cache-update subscriptions', () => {
+  const okResponse = () => ({
+    ok: true,
+    headers: { get: () => 'image/jpeg' },
+    arrayBuffer: () => Promise.resolve(jpegBuffer(256)),
+  });
+
+  it('ignores an empty coverArtId', () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeImageCacheUpdate('', listener);
+    expect(() => unsubscribe()).not.toThrow();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('notifies every subscriber when a file lands, despite one that throws', async () => {
+    const throwing = jest.fn(() => { throw new Error('bad subscriber'); });
+    const listener = jest.fn();
+    const unsubThrowing = subscribeImageCacheUpdate('notify-me', throwing);
+    const unsubListener = subscribeImageCacheUpdate('notify-me', listener);
+    mockFetch.mockResolvedValueOnce(okResponse());
+
+    await ensureCached('notify-me');
+
+    expect(throwing).toHaveBeenCalled();
+    expect(listener).toHaveBeenCalled();
+    unsubThrowing();
+    unsubListener();
+    unsubListener(); // already gone — no-op
+    listener.mockClear();
+    await deleteCachedImage('notify-me');
+    mockFetch.mockResolvedValueOnce(okResponse());
+    await ensureCached('notify-me');
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('a successful download clears the remote-failed flag', async () => {
+    await reportBadRemote('recovers');
+    expect(isRemoteFailed('recovers')).toBe(true);
+    mockFetch.mockResolvedValueOnce(okResponse());
+
+    await ensureCached('recovers');
+
+    expect(isRemoteFailed('recovers')).toBe(false);
+  });
+});
+
+describe('reportBadRemote / isRemoteFailed — listeners and guards', () => {
+  it('ignores an empty coverArtId', async () => {
+    await reportBadRemote('');
+    expect(isRemoteFailed('')).toBe(false);
+  });
+
+  it('notifies subscribers once, and not again while already flagged', async () => {
+    const throwing = jest.fn(() => { throw new Error('bad subscriber'); });
+    const listener = jest.fn();
+    const unsubA = subscribeImageCacheUpdate('remote-bad', throwing);
+    const unsubB = subscribeImageCacheUpdate('remote-bad', listener);
+
+    await reportBadRemote('remote-bad');
+    await reportBadRemote('remote-bad');
+
+    expect(isRemoteFailed('remote-bad')).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubA();
+    unsubB();
+  });
+
+  it('nudges subscribers onto the local file when the source is cached', async () => {
+    seedDbRow({ coverArtId: 'local-wins', size: 600 });
+    const listener = jest.fn();
+    const unsubscribe = subscribeImageCacheUpdate('local-wins', listener);
+
+    await reportBadRemote('local-wins');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isRemoteFailed('local-wins')).toBe(false);
+    unsubscribe();
+  });
+});
+
+describe('retryRemoteImagesForServerSwitch', () => {
+  it('re-notifies every subscriber and clears remote-failed flags', async () => {
+    await reportBadRemote('switch-a');
+    const a = jest.fn();
+    const b = jest.fn();
+    const throwing = jest.fn(() => { throw new Error('bad subscriber'); });
+    const unsubs = [
+      subscribeImageCacheUpdate('switch-a', a),
+      subscribeImageCacheUpdate('switch-b', throwing),
+      subscribeImageCacheUpdate('switch-b', b),
+    ];
+
+    retryRemoteImagesForServerSwitch();
+
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(1);
+    expect(isRemoteFailed('switch-a')).toBe(false);
+    unsubs.forEach((u) => u());
+  });
+});
+
+describe('store-driven recovery', () => {
+  // Module-scope subscriptions registered when the service loaded: [0] offline→online
+  // recovery, [1] entering offline. The stores are mocked, so drive them directly.
+  const offlineListeners = (offlineModeStore.subscribe as jest.Mock).mock.calls.map((c) => c[0]);
+  const connectivityListeners = (connectivityStore.subscribe as jest.Mock).mock.calls.map((c) => c[0]);
+  const getStoreState = imageCacheStore.getState as jest.Mock;
+  const originalGetState = getStoreState.getMockImplementation()!;
+  const withIncompleteCount = (n: number) =>
+    getStoreState.mockImplementation(() => ({ ...originalGetState(), incompleteCount: n }));
+
+  afterEach(() => getStoreState.mockImplementation(originalGetState));
+
+  /** Flag two covers remote-failed; only the first has a subscriber. */
+  async function flagTwo(): Promise<{ listener: jest.Mock; unsubscribe: () => void }> {
+    await reportBadRemote('rec-subscribed');
+    await reportBadRemote('rec-unsubscribed');
+    const listener = jest.fn();
+    const throwing = jest.fn(() => { throw new Error('bad subscriber'); });
+    const u1 = subscribeImageCacheUpdate('rec-subscribed', throwing);
+    const u2 = subscribeImageCacheUpdate('rec-subscribed', listener);
+    return { listener, unsubscribe: () => { u1(); u2(); } };
+  }
+
+  it('registers one offline and one connectivity subscription', () => {
+    expect(offlineListeners).toHaveLength(2);
+    expect(connectivityListeners).toHaveLength(1);
+  });
+
+  it('ignores an offline-store update that does not change offlineMode', async () => {
+    const { listener, unsubscribe } = await flagTwo();
+
+    offlineListeners[0]({ offlineMode: false }, { offlineMode: false });
+    offlineListeners[1]({ offlineMode: false }, { offlineMode: false });
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(isRemoteFailed('rec-subscribed')).toBe(true);
+    unsubscribe();
+  });
+
+  it('coming back online clears every remote-failed flag and skips repair when nothing is incomplete', async () => {
+    withIncompleteCount(0);
+    const { listener, unsubscribe } = await flagTwo();
+
+    offlineListeners[0]({ offlineMode: false }, { offlineMode: true });
+    await flushSpawned();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isRemoteFailed('rec-subscribed')).toBe(false);
+    expect(isRemoteFailed('rec-unsubscribed')).toBe(false);
+    expect(mockAwaitFirstPing).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('coming back online repairs incomplete covers after the first ping', async () => {
+    withIncompleteCount(2);
+
+    offlineListeners[0]({ offlineMode: false }, { offlineMode: true });
+    await flushSpawned();
+
+    expect(mockAwaitFirstPing).toHaveBeenCalledTimes(1);
+    expect(mockFindIncompleteCovers).toHaveBeenCalled();
+  });
+
+  it('skips the repair when offline mode returns during the ping', async () => {
+    withIncompleteCount(2);
+    mockAwaitFirstPing.mockImplementationOnce(async () => { mockOfflineMode.offlineMode = true; });
+
+    offlineListeners[0]({ offlineMode: false }, { offlineMode: true });
+    await flushSpawned();
+
+    expect(mockAwaitFirstPing).toHaveBeenCalledTimes(1);
+    expect(mockFindIncompleteCovers).not.toHaveBeenCalled();
+  });
+
+  it('going offline leaves the online-recovery listener idle but clears flags', async () => {
+    const { listener, unsubscribe } = await flagTwo();
+
+    offlineListeners[0]({ offlineMode: true }, { offlineMode: false });
+    expect(listener).not.toHaveBeenCalled();
+    expect(mockAwaitFirstPing).not.toHaveBeenCalled();
+
+    offlineListeners[1]({ offlineMode: true }, { offlineMode: false });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isRemoteFailed('rec-subscribed')).toBe(false);
+    unsubscribe();
+  });
+
+  it('server reachable again clears flags while online', async () => {
+    const { listener, unsubscribe } = await flagTwo();
+
+    connectivityListeners[0]({ isServerReachable: true }, { isServerReachable: true });
+    expect(listener).not.toHaveBeenCalled();
+
+    connectivityListeners[0]({ isServerReachable: true }, { isServerReachable: false });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isRemoteFailed('rec-unsubscribed')).toBe(false);
+    unsubscribe();
+  });
+
+  it('server reachable again does nothing in offline mode, and a drop only logs', async () => {
+    const { listener, unsubscribe } = await flagTwo();
+    mockOfflineMode.offlineMode = true;
+
+    connectivityListeners[0]({ isServerReachable: true }, { isServerReachable: false });
+    connectivityListeners[0]({ isServerReachable: false }, { isServerReachable: true });
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(isRemoteFailed('rec-subscribed')).toBe(true);
+    unsubscribe();
+  });
+});
+
+describe('downloadSourceImage — no server URL preserves the cover whatever the auth state', () => {
+  const saved = (() => {
+    const { isLoggedIn, serverUrl, username } = authStore.getState();
+    return { isLoggedIn, serverUrl, username };
+  })();
+  afterEach(() => authStore.setState(saved));
+
+  it.each([
+    ['not logged in', { isLoggedIn: false, serverUrl: null, username: null }],
+    ['no server URL', { isLoggedIn: true, serverUrl: null, username: null }],
+    ['no username', { isLoggedIn: true, serverUrl: 'https://s', username: null }],
+    ['fully authenticated', { isLoggedIn: true, serverUrl: 'https://s', username: 'u' }],
+  ])('%s', async (_label, auth) => {
+    authStore.setState(auth);
+    (getCoverArtUrl as jest.Mock).mockReturnValue(null);
+    seedDbRow({ coverArtId: 'no-url', size: 50 });
+
+    await ensureCached('no-url');
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockDbRows.has(mockDbKey('no-url', 50))).toBe(true);
+  });
+});
+
+describe('downloadSourceImage — missing content-type', () => {
+  it('stores the source as jpg', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => null },
+      arrayBuffer: () => Promise.resolve(jpegBuffer(64)),
+    });
+
+    await ensureCached('no-ct');
+
+    expect(mockDbRows.get(mockDbKey('no-ct', 600))?.ext).toBe('jpg');
+  });
+});
+
+describe('resolveCachedImageUri — source fallback without a source', () => {
+  it('returns null when neither the size nor the source is cached', async () => {
+    seedDbRow({ coverArtId: 'only-small', size: 50 });
+    expect(await resolveCachedImageUri('only-small', 300, { sourceFallback: true })).toBeNull();
+  });
+});
+
+describe('clearImageCache — DB unavailable', () => {
+  it.each([true, false])('keeps disk and rows, resets the store (reinit=%s)', async (reinit) => {
+    const healthy = jest.spyOn(dbModule, 'isDbHealthy').mockReturnValue(false);
+    seedDbRow({ coverArtId: 'keep', size: 600, bytes: 10 });
+    teardownImageCache();
+
+    try {
+      await clearImageCache({ reinit });
+
+      expect(mockReset).toHaveBeenCalled();
+      expect(mockClearAllCachedImages).not.toHaveBeenCalled();
+      expect(mockDeleteDirAsyncCalls.size).toBe(0);
+      expect(mockDbRows.size).toBe(1);
+      // reinit re-arms the cache dir; without it the dir stays unset until next init.
+      expect(await resolveCachedImageUri('keep', 600)).toContain('600.jpg');
+    } finally {
+      healthy.mockRestore();
+    }
+  });
+});
+
+describe('scanImageCache — unrepairable covers', () => {
+  /** Source and two variants cached; the 50px resize fails once, so the cover stays incomplete. */
+  function seedUnrepairable(id: string): void {
+    for (const size of [600, 300, 150]) seedDbRow({ coverArtId: id, size });
+    mockFileExistsMap.set(fileMockName(id, '600.jpg'), true);
+    mockResizeImageToFileAsync.mockRejectedValueOnce(new Error('decode failed'));
+  }
+
+  it('removes a cover that still cannot be completed while the server is reachable', async () => {
+    seedUnrepairable('unrepairable');
+
+    const outcome = await scanImageCache();
+
+    expect(outcome).toEqual({ queued: 1, repaired: 0, failed: 0, removed: 1 });
+    expect([...mockDbRows.values()].some((r) => r.coverArtId === 'unrepairable')).toBe(false);
+  });
+
+  it('keeps it as failed when the server is unreachable', async () => {
+    setConnectivity({ isServerReachable: false });
+    seedUnrepairable('unrepairable-offline');
+
+    const outcome = await scanImageCache('settings');
+
+    expect(outcome).toEqual({ queued: 1, repaired: 0, failed: 1, removed: 0 });
+    expect(mockDbRows.has(mockDbKey('unrepairable-offline', 600))).toBe(true);
+  });
+});
+
+describe('repairIncompleteImages — large sets and odd listings', () => {
+  it('handles more than 20 incomplete covers', async () => {
+    (getCoverArtUrl as jest.Mock).mockReturnValue(null);
+    for (let i = 0; i < 21; i++) seedDbRow({ coverArtId: `many-${i}`, size: 50 });
+
+    const outcome = await repairIncompleteImages();
+
+    expect(outcome).toEqual({ queued: 21, repaired: 0, failed: 21, removed: 0 });
+  });
+
+  it('skips an empty directory name in the .tmp sweep', async () => {
+    mockListDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri.endsWith('image-cache')) return ['', 'with-tmp'];
+      return ['600.jpg.tmp', '600.jpg'];
+    });
+
+    await repairIncompleteImages();
+
+    expect([...mockDeleteFileAsyncCalls]).toEqual([fileMockName('with-tmp', '600.jpg.tmp')]);
+  });
+});
+
+describe('reconcileImageCache — downloaded covers are re-cached, never dropped', () => {
+  afterEach(() => musicCacheStore.setState({ cachedItems: {}, cachedSongs: {} }));
+
+  it('keeps the rows of a downloaded cover whose files are gone or empty and re-caches it', async () => {
+    musicCacheStore.setState({
+      cachedItems: { i1: { coverArtId: 'dl-a' }, i2: {} } as any,
+      cachedSongs: {
+        s1: { coverArt: 'dl-b', albumId: 'some-album' },
+        s2: {},
+      } as any,
+    });
+    (getCoverArtUrl as jest.Mock).mockReturnValue(null);
+    // dl-a: source on disk, 300 zero-byte. dl-b: 150 row with no file at all.
+    seedDbRow({ coverArtId: 'dl-a', size: 600 });
+    seedDbRow({ coverArtId: 'dl-a', size: 300 });
+    seedDbRow({ coverArtId: 'dl-b', size: 150 });
+    mockListDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri.endsWith('image-cache')) return ['dl-a', 'dl-b'];
+      if (uri.endsWith('dl-a')) return ['600.jpg', '300.jpg'];
+      return [];
+    });
+    mockFileExistsMap.set(fileMockName('dl-a', '600.jpg'), true);
+    mockFileExistsMap.set(fileMockName('dl-a', '300.jpg'), true);
+    mockFileSizeMap.set(fileMockName('dl-a', '300.jpg'), 0);
+
+    await reconcileImageCache();
+    await flushSpawned();
+
+    // No row dropped; dl-a re-generated its missing variants from the cached source and
+    // dl-b went back to the server for its source.
+    expect(mockDeleteCachedImageVariants).not.toHaveBeenCalled();
+    expect(mockDbRows.has(mockDbKey('dl-a', 300))).toBe(true);
+    expect(mockDbRows.has(mockDbKey('dl-b', 150))).toBe(true);
+    expect(mockResizeImageToFileAsync).toHaveBeenCalled();
+    expect((getCoverArtUrl as jest.Mock).mock.calls.map((c) => c[0])).toContain('dl-b');
   });
 });
