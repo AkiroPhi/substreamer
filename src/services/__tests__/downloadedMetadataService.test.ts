@@ -16,8 +16,14 @@ const mockRefreshState = {
   tick: jest.fn(),
   finish: jest.fn(),
 };
+const mockUpsertCachedItem = jest.fn();
+const mockAlbumTokens = new Map<string, string>();
 const mockCacheState = {
-  cachedItems: {} as Record<string, { type: string; parentAlbumId?: string; songIds?: string[] }>,
+  upsertCachedItem: (item: unknown) => mockUpsertCachedItem(item),
+  cachedItems: {} as Record<
+    string,
+    { type: string; parentAlbumId?: string; songIds?: string[]; coverArtId?: string }
+  >,
   cachedSongs: {} as Record<string, { id: string; albumId?: string | null; srcAlbumId?: string }>,
 };
 const mockAlbumState = { albums: {} as Record<string, unknown> };
@@ -61,6 +67,10 @@ jest.mock('../../db/repository/songs', () => ({
     async (_db: unknown, ids: string[]) => new Set(ids.filter((id) => mockAlbumState.albums[id])),
   ),
 }));
+jest.mock('../../db/repository/coverArt', () => ({
+  albumCoverTokens: jest.fn(async (_db: unknown, ids: string[]) =>
+    new Map(ids.filter((id) => mockAlbumTokens.has(id)).map((id) => [id, mockAlbumTokens.get(id)!]))),
+}));
 jest.mock('../../db/repository/playlists', () => ({
   playlistIdsWithSongs: jest.fn(
     async (_db: unknown, ids: string[]) =>
@@ -78,6 +88,8 @@ beforeEach(() => {
   mockRefreshState.finish.mockClear();
   mockCacheState.cachedItems = {};
   mockCacheState.cachedSongs = {};
+  mockAlbumTokens.clear();
+  mockUpsertCachedItem.mockClear();
   mockAlbumState.albums = {};
   mockPlaylistState.playlists = {};
   mockFailIds.clear();
@@ -183,5 +195,52 @@ describe('refreshDownloadedMetadata — outcome shape', () => {
     expect(mockFetchAlbum).toHaveBeenCalledWith('albB', { prefetchCovers: true, force: false });
     expect(mockFetchAlbum).not.toHaveBeenCalledWith('old-dir', expect.anything());
     expect(mockFetchAlbum).not.toHaveBeenCalledWith('_unknown', expect.anything());
+  });
+});
+
+describe('album item cover repair', () => {
+  it("points a partial album that stored a song's cover at the album's own cover", async () => {
+    mockAlbumState.albums.albA = { id: 'albA', song: [] }; // detail present: nothing to fetch
+    mockCacheState.cachedItems = {
+      albA: { type: 'album', songIds: ['s1', 's2'], coverArtId: 'dc-albA:1_x' },
+    };
+    mockAlbumTokens.set('albA', 'al-albA_h');
+
+    await refreshDownloadedMetadata({ mode: 'missing' });
+
+    expect(mockUpsertCachedItem).toHaveBeenCalledTimes(1);
+    expect(mockUpsertCachedItem).toHaveBeenCalledWith(
+      expect.objectContaining({ coverArtId: 'al-albA_h', songIds: ['s1', 's2'] }),
+    );
+  });
+
+  it('leaves correct album items, unknown albums and non-album items alone', async () => {
+    mockAlbumState.albums.albA = { id: 'albA', song: [] };
+    mockAlbumState.albums.albB = { id: 'albB', song: [] };
+    mockCacheState.cachedItems = {
+      albA: { type: 'album', coverArtId: 'al-albA_h' },
+      albB: { type: 'album', coverArtId: 'dc-albB:1_x' }, // album unknown to the DB
+      pl1: { type: 'playlist', coverArtId: 'pl-1' },
+    };
+    mockAlbumTokens.set('albA', 'al-albA_h');
+    mockPlaylistState.playlists.pl1 = { id: 'pl1', entry: [] };
+
+    await refreshDownloadedMetadata({ mode: 'missing' });
+
+    expect(mockUpsertCachedItem).not.toHaveBeenCalled();
+  });
+
+  it('repairs offline too: it needs no network', async () => {
+    mockOfflineState.offlineMode = true;
+    mockCacheState.cachedItems = { albA: { type: 'album', coverArtId: 'mf-1' } };
+    mockAlbumTokens.set('albA', 'al-albA_h');
+
+    const out = await refreshDownloadedMetadata({ mode: 'missing' });
+
+    expect(out).toEqual({ attempted: 0, remaining: 0 });
+    expect(mockFetchAlbum).not.toHaveBeenCalled();
+    expect(mockUpsertCachedItem).toHaveBeenCalledWith(
+      expect.objectContaining({ coverArtId: 'al-albA_h' }),
+    );
   });
 });

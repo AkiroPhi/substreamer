@@ -100,7 +100,12 @@ jest.mock('../downloadSpeedTracker', () => ({
 
 jest.mock('../imageCacheService', () => ({
   ensureCached: jest.fn().mockResolvedValue(undefined),
-  prefetchCoverArt: jest.fn(),
+  cacheSongCovers: jest.fn().mockResolvedValue(undefined),
+  resolveDisplayImage: jest.fn(async (subject: { coverArt?: string | null }) => ({
+    coverArtId: subject.coverArt ?? undefined,
+    uri: null,
+    isRemote: false,
+  })),
   resolveCachedImageUri: jest.fn().mockResolvedValue(null),
 }));
 
@@ -352,7 +357,7 @@ import { storageLimitStore } from '../../store/storageLimitStore';
 import { offlineModeStore } from '../../store/offlineModeStore';
 import { playbackSettingsStore } from '../../store/playbackSettingsStore';
 import { checkStorageLimit } from '../storageService';
-import { ensureCached, prefetchCoverArt } from '../imageCacheService';
+import { cacheSongCovers, ensureCached } from '../imageCacheService';
 import { getDownloadStreamUrl } from '../subsonicService';
 import { beginDownload, clearDownload } from '../downloadSpeedTracker';
 import {
@@ -1052,7 +1057,7 @@ describe('enqueueAlbumDownload', () => {
     // (see src/utils/coverArtId.ts).
     expect(ensureCached).toHaveBeenCalledWith('ac');
     expect(ensureCached).not.toHaveBeenCalledWith('album-1');
-    expect(prefetchCoverArt).toHaveBeenCalled();
+    expect(cacheSongCovers).toHaveBeenCalled();
   });
 
   it('uses displayArtist when artist is missing', async () => {
@@ -1851,10 +1856,10 @@ describe('syncCachedItemTracks', () => {
   describe('cover-art reconciliation (offline items only)', () => {
     beforeEach(() => {
       (ensureCached as jest.Mock).mockClear();
-      (prefetchCoverArt as jest.Mock).mockClear();
+      (cacheSongCovers as jest.Mock).mockClear();
     });
 
-    it('triggers ensureCached for the offline item and prefetchCoverArt for tracks when item exists', async () => {
+    it('triggers ensureCached for the offline item and caches both covers of its tracks when item exists', async () => {
       seedSong(makeCachedSong('s1'));
       seedItem('pl-1', { type: 'playlist', songIds: ['s1'], coverArtId: 'pl-cover' });
 
@@ -1864,7 +1869,7 @@ describe('syncCachedItemTracks', () => {
       // Item's own cover art reconciled.
       expect(ensureCached).toHaveBeenCalledWith('pl-cover');
       // Per-track covers reconciled (idempotent no-op when complete).
-      expect(prefetchCoverArt).toHaveBeenCalledWith(newSongs);
+      expect(cacheSongCovers).toHaveBeenCalledWith(newSongs);
     });
 
     it('runs even when no track changes are detected (heals missing/zero-byte covers)', async () => {
@@ -1877,7 +1882,7 @@ describe('syncCachedItemTracks', () => {
 
       expect(musicCacheStore.getState().downloadQueue).toHaveLength(0);
       expect(ensureCached).toHaveBeenCalledWith('pl-cover');
-      expect(prefetchCoverArt).toHaveBeenCalledTimes(1);
+      expect(cacheSongCovers).toHaveBeenCalledTimes(1);
     });
 
     it('does NOT trigger any cover reconciliation for a non-offline item', async () => {
@@ -1888,7 +1893,7 @@ describe('syncCachedItemTracks', () => {
       // before reaching the cover reconciliation. Prevents library-wide
       // fan-out that users explicitly don't want.
       expect(ensureCached).not.toHaveBeenCalled();
-      expect(prefetchCoverArt).not.toHaveBeenCalled();
+      expect(cacheSongCovers).not.toHaveBeenCalled();
     });
 
     it('skips ensureCached when the item has no coverArtId but still reconciles per-song covers', async () => {
@@ -1899,7 +1904,7 @@ describe('syncCachedItemTracks', () => {
       syncCachedItemTracks('pl-2', newSongs);
 
       expect(ensureCached).not.toHaveBeenCalled();
-      expect(prefetchCoverArt).toHaveBeenCalledWith(newSongs);
+      expect(cacheSongCovers).toHaveBeenCalledWith(newSongs);
     });
   });
 });
@@ -2450,6 +2455,51 @@ describe('download pipeline', () => {
 
     const partial = musicCacheStore.getState().cachedItems['album-Z'];
     expect(partial.songIds.sort()).toEqual(['p1', 'p2']);
+  });
+
+  it("partial-album: a new row shows the album's own cover, not the song's", async () => {
+    mockFileExists = true;
+    mockFileSize = 5000;
+    mockDownloadFileAsyncWithProgress.mockResolvedValue(undefined);
+    mockAlbumDetailAlbums.value = {
+      'album-cov': { album: { id: 'album-cov', coverArt: 'al-cov_h', song: [{ id: 'cov-t1' }] } },
+    };
+    mockFetchPlaylist.mockResolvedValue({
+      id: 'pl-cov',
+      name: 'X',
+      entry: [makeChild('cov-t1', { albumId: 'album-cov', coverArt: 'dc-cov:1_x' })],
+    });
+    (cacheSongCovers as jest.Mock).mockClear();
+
+    await enqueuePlaylistDownload('pl-cov');
+    await waitForQueueIdle();
+
+    expect(musicCacheStore.getState().cachedItems['album-cov'].coverArtId).toBe('al-cov_h');
+    // Both covers are cached once the album row exists.
+    expect(cacheSongCovers).toHaveBeenCalledWith([expect.objectContaining({ id: 'cov-t1' })]);
+  });
+
+  it("partial-album: an existing row that stored the song's cover is corrected", async () => {
+    mockFileExists = true;
+    mockFileSize = 5000;
+    mockDownloadFileAsyncWithProgress.mockResolvedValue(undefined);
+    seedSong(makeCachedSong('q1', { albumId: 'album-Q' }));
+    seedItem('album-Q', { type: 'album', songIds: ['q1'], expectedSongCount: 2, coverArtId: 'dc-Q:1_x' });
+    mockAlbumDetailAlbums.value = {
+      'album-Q': { album: { id: 'album-Q', coverArt: 'al-Q_h', song: [{ id: 'q1' }, { id: 'q2' }] } },
+    };
+    mockFetchPlaylist.mockResolvedValue({
+      id: 'pl-q',
+      name: 'X',
+      entry: [makeChild('q2', { albumId: 'album-Q' })],
+    });
+
+    await enqueuePlaylistDownload('pl-q');
+    await waitForQueueIdle();
+
+    const partial = musicCacheStore.getState().cachedItems['album-Q'];
+    expect(partial.coverArtId).toBe('al-Q_h');
+    expect(partial.songIds.sort()).toEqual(['q1', 'q2']);
   });
 
   it('partial-album: cached_songs row captures the full Child in promoted columns', async () => {

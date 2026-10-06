@@ -77,11 +77,11 @@ import {
 } from './subsonicService';
 import {
   ensureCached,
-  prefetchCoverArt,
+  cacheSongCovers,
+  resolveDisplayImage,
 } from './imageCacheService';
 import { coverArtForAlbum, coverArtForPlaylist } from '../utils/coverArtId';
 import { runPool } from '../utils/promisePool';
-import { albumCoverArtById, resolveSongCoverArt } from '../hooks/useSongCoverArt';
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -783,10 +783,6 @@ export function getTrackQueueStatus(trackId: string): 'queued' | 'downloading' |
 /*  Enqueue downloads                                                  */
 /* ------------------------------------------------------------------ */
 
-function cacheTrackCoverArt(tracks: Child[]): void {
-  prefetchCoverArt(tracks);
-}
-
 /** Enqueue an album download. */
 /**
  * Cache an item's cover source before its audio binaries so a downloaded item
@@ -887,7 +883,7 @@ export async function enqueueAlbumDownload(
     // the grid renders and resolves on OpenSubsonic servers.
     const topUpCover = coverArtForAlbum(album);
     await ensureCoverBeforeBinary(topUpCover, awaitCover);
-    cacheTrackCoverArt(missingSongs);
+    void cacheSongCovers(missingSongs);
 
     musicCacheStore.getState().enqueueTopUp(
       {
@@ -907,7 +903,7 @@ export async function enqueueAlbumDownload(
 
   const albumCover = coverArtForAlbum(album);
   await ensureCoverBeforeBinary(albumCover, awaitCover);
-  cacheTrackCoverArt(album.song);
+  void cacheSongCovers(album.song ?? []);
 
   musicCacheStore.getState().enqueue(
     {
@@ -944,7 +940,7 @@ export async function enqueuePlaylistDownload(
   // Cover art keys off the playlist's `coverArt` value (see coverArtId.ts).
   const playlistCover = coverArtForPlaylist(playlist);
   await ensureCoverBeforeBinary(playlistCover, awaitCover);
-  cacheTrackCoverArt(playlist.entry);
+  void cacheSongCovers(playlist.entry ?? []);
 
   musicCacheStore.getState().enqueue(
     {
@@ -992,10 +988,11 @@ export async function enqueueSongDownload(song: Child): Promise<void> {
       } catch { /* best-effort — parent album detail is a bonus for the song */ }
     }
   }
-  const songCover = resolveSongCoverArt(song);
-  if (songCover) {
-    try { await ensureCached(songCover); } catch { /* best-effort */ }
-  }
+  // Both covers (its own and its album's) before the binary.
+  await cacheSongCovers([song]);
+  const songCover = (
+    await resolveDisplayImage(song, 600, { offline: offlineModeStore.getState().offlineMode })
+  ).coverArtId;
 
   const state = musicCacheStore.getState();
   // If the underlying song is already fully cached, don't transfer bytes —
@@ -1165,6 +1162,9 @@ async function ensurePartialAlbumEdge(
     if (db) detail = await getAlbumDetail(db, albumId);
   }
   const authoritativeCount = detail && detail.songs.length > 0 ? detail.songs.length : undefined;
+  // The album row now exists when the fetch succeeded, so its cover can be cached too.
+  void cacheSongCovers([song]);
+  const albumCover = detail?.album.coverArt;
 
   const state = musicCacheStore.getState();
   const existing = state.cachedItems[albumId];
@@ -1175,14 +1175,17 @@ async function ensurePartialAlbumEdge(
     // component row is the only form now, the conversion having promoted any
     // envelope into it before the store published this row.
     const metadata = existing.albumMeta ? {} : await buildCachedItemMetadata(albumId, 'album');
+    const coverChanged = !!albumCover && albumCover !== existing.coverArtId;
     if (
       (authoritativeCount !== undefined && authoritativeCount !== existing.expectedSongCount) ||
-      metadata.albumMeta !== undefined
+      metadata.albumMeta !== undefined ||
+      coverChanged
     ) {
       musicCacheStore.getState().upsertCachedItem({
         ...existing,
         expectedSongCount:
           authoritativeCount !== undefined ? authoritativeCount : existing.expectedSongCount,
+        ...(coverChanged ? { coverArtId: albumCover } : {}),
         ...metadata,
       });
     }
@@ -1219,9 +1222,8 @@ async function ensurePartialAlbumEdge(
       type: 'album',
       name: song.album ?? detail?.album.name ?? 'Unknown',
       artist: song.artist ?? detail?.album.artist,
-      // Album item — cover art keys off the album's `coverArt` value,
-      // looked up from the synced library (fallback to the song's own cover).
-      coverArtId: albumCoverArtById(albumId) ?? song.coverArt,
+      // An album item shows the album's own cover; the song's only when the album is unknown.
+      coverArtId: albumCover ?? song.coverArt,
       expectedSongCount,
       parentAlbumId: undefined,
       lastSyncAt: now,
@@ -2046,7 +2048,7 @@ export function syncCachedItemTracks(
   if (cached.coverArtId) {
     ensureCached(cached.coverArtId).catch(() => { /* non-critical */ });
   }
-  prefetchCoverArt(newSongs);
+  void cacheSongCovers(newSongs);
 
   const hasNewTracks = newSongs.some((t) => !cachedIdSet.has(t.id));
   if (!hasNewTracks) return;
@@ -2331,7 +2333,7 @@ export async function enqueueStarredSongsDownload(): Promise<void> {
   if (songs.length === 0) return;
 
   await ensureCoverArtAuth();
-  cacheTrackCoverArt(songs);
+  void cacheSongCovers(songs);
 
   // Ensure the parent-album detail of each favorited song is cached so the album
   // a favorite belongs to is available offline. Throttled + fire-and-forget (a

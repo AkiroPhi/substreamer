@@ -60,7 +60,7 @@ import {
 } from '../store/persistence/imageCacheTable';
 import { getDb, isDbHealthy } from '../store/persistence/db';
 import { hydrateCachedItems, hydrateCachedSongs, UNKNOWN_ALBUM_ID } from '../store/persistence/musicCacheTables';
-import { coverTokensWithImages, type CoverLookup } from '../db/repository/coverArt';
+import { albumCoverTokens, coverTokensWithImages, type CoverLookup } from '../db/repository/coverArt';
 import { musicCacheStore } from '../store/musicCacheStore';
 import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
 import {
@@ -430,44 +430,48 @@ function isPurgeAllowedNow(): boolean {
   return !offline && conn.hasConnection && conn.isServerReachable;
 }
 
-// Memoized set of cover-art ids belonging to DOWNLOADED items (albums,
-// playlists, individually-downloaded songs) AND their per-track covers.
-// Rebuilt only when `cachedItems`/`cachedSongs`/the cover-art mode change. Used
-// to protect downloaded covers from the automated purge paths — a downloaded
-// item's cached cover (including a downloaded playlist's/album's individual
-// track thumbnails in per-track mode) must never be evicted by a transient
-// server error; offline is a filtered view of this data.
+// Memoized set of cover-art tokens belonging to DOWNLOADED music: item covers, plus BOTH
+// covers of every downloaded song (its own and its album's), whatever the cover mode, so a
+// mode switch offline still finds its art. Rebuilt only when `cachedItems`/`cachedSongs`
+// change. Used to protect downloaded covers from the automated purge paths. Sync: its callers
+// are, and an async answer would let a purge run before it lands.
+//
+// Songs come from the STORE, not `cached_songs`: a new download reaches the store at once but
+// its row lands a batch later, so a SQL read could miss it. Only the album tokens come from SQL.
 let _dlCoverItemsSrc: unknown = null;
 let _dlCoverSongsSrc: unknown = null;
-let _dlCoverMode: string | null = null;
 let _dlCoverIds = new Set<string>();
 function downloadedCoverArtIds(): Set<string> {
-  const state = musicCacheStore.getState();
-  const cachedItems = state.cachedItems;
-  const cachedSongs = state.cachedSongs;
-  const mode = layoutPreferencesStore.getState().songCoverArtMode;
-  if (cachedItems !== _dlCoverItemsSrc || cachedSongs !== _dlCoverSongsSrc || mode !== _dlCoverMode) {
-    const next = new Set<string>();
-    // Item-level covers (album/playlist/song/favorites holders).
-    for (const item of Object.values(cachedItems) as Array<{ coverArtId?: string }>) {
-      if (item.coverArtId) next.add(item.coverArtId);
-    }
-    // Per-track covers of every downloaded song, resolved mode-aware (album mode:
-    // parent album's cover so tracks share one file; per-track: the song's own
-    // cover) — mirrors the recache path so a downloaded playlist's/album's track
-    // thumbnails are protected too, not just the item-level cover.
-    for (const s of Object.values(cachedSongs) as Array<{
-      coverArt?: string | null;
-      albumId?: string | null;
-    }>) {
-      const id = resolveSongCoverArt(s);
-      if (id) next.add(id);
-    }
-    _dlCoverIds = next;
-    _dlCoverItemsSrc = cachedItems;
-    _dlCoverSongsSrc = cachedSongs;
-    _dlCoverMode = mode;
+  const { cachedItems, cachedSongs } = musicCacheStore.getState();
+  if (cachedItems === _dlCoverItemsSrc && cachedSongs === _dlCoverSongsSrc) return _dlCoverIds;
+
+  const next = new Set<string>();
+  for (const item of Object.values(cachedItems)) {
+    if (item.coverArtId) next.add(item.coverArtId);
   }
+  const albumIds = new Set<string>();
+  for (const song of Object.values(cachedSongs)) {
+    if (song.coverArt) next.add(song.coverArt);
+    const albumId = song.srcAlbumId ?? song.albumId;
+    if (albumId && albumId !== UNKNOWN_ALBUM_ID) albumIds.add(albumId);
+  }
+  const db = getDb();
+  if (db !== null && albumIds.size > 0) {
+    try {
+      for (const r of db.getAllSync<{ v: string | null }>(
+        `SELECT DISTINCT COALESCE(NULLIF(a.cover_art, ''), NULLIF(ca.cover_art, '')) AS v
+           FROM json_each(?) j
+           LEFT JOIN albums a ON a.id = j.value
+           LEFT JOIN cached_albums ca ON ca.item_id = j.value`,
+        [JSON.stringify([...albumIds])],
+      )) if (r.v) next.add(r.v);
+    } catch {
+      /* the item and song covers above are still protected */
+    }
+  }
+  _dlCoverIds = next;
+  _dlCoverItemsSrc = cachedItems;
+  _dlCoverSongsSrc = cachedSongs;
   return _dlCoverIds;
 }
 
@@ -2114,6 +2118,29 @@ export function prefetchCoverArt(
 }
 
 /**
+ * Cache BOTH covers of each downloaded song at every size — its own `coverArt` and its
+ * album's — whatever the cover mode, so either mode has its art offline. Covers already on
+ * disk are skipped by `cacheAllSizes`. Never rejects; a failed album lookup still caches the
+ * song covers.
+ */
+export async function cacheSongCovers(songs: readonly CoverSubject[]): Promise<void> {
+  const tokens = new Set<string>();
+  for (const s of songs) if (s.coverArt) tokens.add(s.coverArt);
+  const albumIds = songs
+    .map((s) => s.albumId)
+    .filter((id): id is string => !!id && id !== UNKNOWN_ALBUM_ID);
+  const db = getDb();
+  if (db !== null && albumIds.length > 0) {
+    try {
+      for (const token of (await albumCoverTokens(db, albumIds)).values()) tokens.add(token);
+    } catch {
+      /* the songs' own covers below still cache */
+    }
+  }
+  await Promise.all([...tokens].map((t) => cacheAllSizes(t).catch(() => { /* non-critical */ })));
+}
+
+/**
  * Snapshot every cached item row's `(type, coverArtId)` for the
  * persistent image-download queue's `refresh-downloads` scope.
  *
@@ -2623,6 +2650,18 @@ function snapshotDownloadedCoverArtIds(): string[] {
       } catch {
         // Column or table absent on this install's schema era; the others still apply.
       }
+    }
+    // The album cover of EVERY downloaded song — including playlist, favourites and single-song
+    // downloads, whose album has no `cached_albums` row. `src_album_id` is the server album;
+    // `album_id` is the file's directory and only stands in for rows that predate it.
+    try {
+      for (const r of db.getAllSync<{ v: string | null }>(
+        `SELECT DISTINCT a.cover_art AS v FROM cached_songs s
+           JOIN albums a ON a.id = COALESCE(s.src_album_id, s.album_id)
+          WHERE a.cover_art IS NOT NULL AND a.cover_art <> ''`,
+      )) add(r.v);
+    } catch {
+      // `src_album_id` absent on this install's schema era; the sources above still apply.
     }
     return out;
   }

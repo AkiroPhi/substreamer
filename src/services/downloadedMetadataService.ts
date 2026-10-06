@@ -18,6 +18,7 @@ import { musicCacheStore } from '../store/musicCacheStore';
 import { offlineModeStore } from '../store/offlineModeStore';
 import { getDb } from '../store/persistence/db';
 import { UNKNOWN_ALBUM_ID } from '../store/persistence/musicCacheTables';
+import { albumCoverTokens } from '../db/repository/coverArt';
 import { albumIdsWithSongs } from '../db/repository/songs';
 import { playlistIdsWithSongs } from '../db/repository/playlists';
 import { runPool } from '../utils/promisePool';
@@ -42,6 +43,41 @@ export interface RefreshOutcome {
  * stragglers. (0/0 when offline or nothing to do.)
  */
 export async function refreshDownloadedMetadata(opts: {
+  mode: 'missing' | 'all';
+}): Promise<RefreshOutcome> {
+  const outcome = await fetchDownloadedMetadata(opts);
+  await repairAlbumItemCovers();
+  return outcome;
+}
+
+/**
+ * Point every downloaded album item at its album's own cover token. A partial album created
+ * while the album was unknown stored the SONG's cover instead. Local data only (the album rows
+ * the fetch above keeps current), so it runs offline and on every pass.
+ */
+async function repairAlbumItemCovers(): Promise<void> {
+  const db = getDb();
+  if (db === null) return;
+  const albumItemIds = Object.entries(musicCacheStore.getState().cachedItems)
+    .filter(([, item]) => item.type === 'album')
+    .map(([id]) => id);
+  if (albumItemIds.length === 0) return;
+  let tokens: Map<string, string>;
+  try {
+    tokens = await albumCoverTokens(db, albumItemIds);
+  } catch {
+    return; // nothing to repair from; the next pass retries
+  }
+  for (const [id, token] of tokens) {
+    // Read at write time, so a concurrent edge update is not overwritten.
+    const fresh = musicCacheStore.getState().cachedItems[id];
+    if (fresh && fresh.coverArtId !== token) {
+      musicCacheStore.getState().upsertCachedItem({ ...fresh, coverArtId: token });
+    }
+  }
+}
+
+async function fetchDownloadedMetadata(opts: {
   mode: 'missing' | 'all';
 }): Promise<RefreshOutcome> {
   if (offlineModeStore.getState().offlineMode) return { attempted: 0, remaining: 0 };

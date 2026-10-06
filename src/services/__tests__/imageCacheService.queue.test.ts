@@ -147,9 +147,11 @@ jest.mock('../../store/persistence/db', () => ({
   getDb: () => ({
     getAllSync: (sql: string) => {
       // Keyed by table+column: cached_songs is read twice, once per cover-art mode.
-      const key = sql.includes('cached_songs')
-        ? (sql.includes('cover_art_id') ? 'cached_songs_cover_art_id' : 'cached_songs_cover_art')
-        : Object.keys(mockCoverRows).find((t) => sql.includes(t));
+      const key = sql.includes('JOIN albums')
+        ? 'downloaded_song_album_cover_art'
+        : sql.includes('cached_songs')
+          ? (sql.includes('cover_art_id') ? 'cached_songs_cover_art_id' : 'cached_songs_cover_art')
+          : Object.keys(mockCoverRows).find((t) => sql.includes(t));
       if (key === undefined || !(key in mockCoverRows)) throw new Error(`unmocked: ${sql}`);
       return mockCoverRows[key].map((v) => ({ v }));
     },
@@ -259,6 +261,7 @@ beforeEach(() => {
   // earlier tests calling __setImageDownloaderForTest(undefined).
   __setImageDownloaderForTest(mockDownloader);
   mockCoverRows.cached_albums = [];
+  mockCoverRows.downloaded_song_album_cover_art = [];
   mockCoverRows.cached_playlists = [];
   mockCoverRows.cached_songs_cover_art = [];
   mockCoverRows.cached_songs_cover_art_id = [];
@@ -295,6 +298,20 @@ describe('enqueueImageRefreshCycle', () => {
     expect(scope).toBe('refresh-downloads');
     const meta = await getImageQueueState();
     expect(meta.cycleTotal).toBe(3);
+  });
+
+  it('refresh-downloads includes the album cover of every downloaded song', async () => {
+    // A playlist / favourites / single-song download has no cached_albums row for the
+    // song's album, so its album cover comes from the downloaded songs joined to albums.
+    mockCoverRows.cached_albums = ['al-1_hash'];
+    mockCoverRows.cached_playlists = ['pl-1_hash'];
+    mockCoverRows.cached_songs_cover_art = ['dc-a2:1_0'];
+    mockCoverRows.downloaded_song_album_cover_art = ['al-2_hash', 'al-1_hash'];
+
+    await enqueueImageRefreshCycle('refresh-downloads');
+
+    const [ids] = mockEnqueueBulk.mock.calls[0];
+    expect(ids).toEqual(['al-1_hash', 'pl-1_hash', 'dc-a2:1_0', 'al-2_hash']);
   });
 
   // The regression this fixes: cached_items.cover_art_id is frozen at download time and
