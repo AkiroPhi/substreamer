@@ -59,7 +59,8 @@ import {
   type CacheBrowserFilter,
 } from '../store/persistence/imageCacheTable';
 import { getDb, isDbHealthy } from '../store/persistence/db';
-import { hydrateCachedItems, hydrateCachedSongs } from '../store/persistence/musicCacheTables';
+import { hydrateCachedItems, hydrateCachedSongs, UNKNOWN_ALBUM_ID } from '../store/persistence/musicCacheTables';
+import { coverTokensWithImages, type CoverLookup } from '../db/repository/coverArt';
 import { musicCacheStore } from '../store/musicCacheStore';
 import { layoutPreferencesStore } from '../store/layoutPreferencesStore';
 import {
@@ -1330,31 +1331,81 @@ export function buildRemoteImageUrl(
 }
 
 /**
- * Resolve the URI to DISPLAY for a cover — the single decision shared by
- * `CachedImage` and headless consumers (the CarPlay / Android-Auto browse
- * service). Prefers the on-disk cache (`file://`), then the server URL, gated on
- * offline + the remote-failed set — exactly how `CachedImage` picks its render
- * URI. Returns `{ isRemote }` so a component can drive its error reporting; a
- * service just reads `.uri`.
- *
- * `skipCache` bypasses the local cache (used by `CachedImage` after a cached
- * file has errored, to fall straight to the server URL). Returns `null` when
- * nothing is displayable (no id, or offline/failed with no cached file) — the
- * caller renders its placeholder / omits the artwork.
+ * What to show a cover from. An album, artist or playlist passes its own `coverArt`; a song
+ * passes its `coverArt` AND `albumId`, so album mode can use the album's cover instead.
  */
-export async function resolveDisplayImage(
-  coverArtId: string | undefined,
+export interface CoverSubject {
+  coverArt?: string | null;
+  albumId?: string | null;
+}
+
+/** A resolved cover: its token, and the URI to show (`null` → render the placeholder). */
+export interface DisplayImage {
+  coverArtId: string | undefined;
+  uri: string | null;
+  isRemote: boolean;
+}
+
+/**
+ * THE cover resolver — every surface that shows a cover goes through it (in-app images, the
+ * player's lock-screen/CarPlay/notification artwork, the headless CarPlay browse rows).
+ *
+ * The token: a song in album mode uses its album's `cover_art` (library, then downloaded album
+ * metadata, then the song's own); per-track mode and non-song subjects use their own `coverArt`.
+ * The image: the cached file (exact size, else the 600 source), else — unless `offline`, or the
+ * token's remote URL already failed — the server URL, else `null`. `skipCache` goes straight to
+ * the server URL (a cached file failed to decode).
+ *
+ * One query for the whole batch. Never throws: a failed read falls back to each subject's own
+ * token, so the player never loses a queue over artwork.
+ */
+export async function resolveDisplayImages(
+  subjects: readonly CoverSubject[],
   size: number,
   opts: { offline: boolean; skipCache?: boolean },
-): Promise<{ uri: string; isRemote: boolean } | null> {
-  if (!coverArtId) return null;
-  if (!opts.skipCache) {
-    const cached = await resolveCachedImageUri(coverArtId, size, { sourceFallback: true });
-    if (cached) return { uri: cached, isRemote: false };
+): Promise<DisplayImage[]> {
+  const albumMode = layoutPreferencesStore.getState().songCoverArtMode === 'album';
+  const lookups: CoverLookup[] = subjects.map((s) => ({
+    coverArt: s.coverArt || null,
+    albumId: albumMode && s.albumId && s.albumId !== UNKNOWN_ALBUM_ID ? s.albumId : null,
+  }));
+
+  const tokens: Array<string | undefined> = subjects.map((s) => s.coverArt || undefined);
+  const variants: Array<Map<number, string>> = subjects.map(() => new Map());
+  const db = getDb();
+  if (db !== null) {
+    try {
+      for (const row of await coverTokensWithImages(db, lookups)) {
+        tokens[row.index] = row.token ?? undefined;
+        if (row.size != null && row.ext) variants[row.index].set(row.size, row.ext);
+      }
+    } catch {
+      /* fall back to each subject's own token, already seeded above */
+    }
   }
-  if (opts.offline || isRemoteFailed(coverArtId)) return null;
-  const remote = buildRemoteImageUrl(coverArtId, size);
-  return remote ? { uri: remote, isRemote: true } : null;
+
+  return tokens.map((token, i) => {
+    if (!token) return { coverArtId: undefined, uri: null, isRemote: false };
+    if (!opts.skipCache) {
+      const sizes = variants[i];
+      const hit = sizes.has(size) ? size : sizes.has(SOURCE_SIZE) ? SOURCE_SIZE : null;
+      if (hit != null) {
+        return { coverArtId: token, uri: buildVariantUri(token, hit, sizes.get(hit)!), isRemote: false };
+      }
+    }
+    if (opts.offline || isRemoteFailed(token)) return { coverArtId: token, uri: null, isRemote: false };
+    const remote = buildRemoteImageUrl(token, size);
+    return { coverArtId: token, uri: remote, isRemote: remote != null };
+  });
+}
+
+/** One cover — see {@link resolveDisplayImages}. */
+export async function resolveDisplayImage(
+  subject: CoverSubject,
+  size: number,
+  opts: { offline: boolean; skipCache?: boolean },
+): Promise<DisplayImage> {
+  return (await resolveDisplayImages([subject], size, opts))[0];
 }
 
 /* ------------------------------------------------------------------ */

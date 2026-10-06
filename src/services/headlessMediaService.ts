@@ -215,7 +215,7 @@ async function homeInput(): Promise<ComposeHomeInput> {
  */
 async function resolveRowArtwork(coverArtValue: string | undefined): Promise<string | undefined> {
   if (!coverArtValue) return undefined;
-  return (await resolveDisplayImage(coverArtValue, ART_SIZE, { offline: isOffline() }))?.uri;
+  return (await resolveDisplayImage({ coverArt: coverArtValue }, ART_SIZE, { offline: isOffline() })).uri ?? undefined;
 }
 
 /** Resolve artwork for a set of coverArt values, DEDUPED — album mode makes a

@@ -48,18 +48,19 @@ jest.mock('../../services/imageCacheService', () => ({
   // offline + remote-failed) by composing the mocked primitives, so the tests'
   // existing per-primitive setups still drive CachedImage's render branches.
   resolveDisplayImage: async (
-    id: string,
+    subject: { coverArt?: string | null },
     size: number,
     opts: { offline: boolean; skipCache?: boolean },
   ) => {
-    if (!id) return null;
+    const id = subject.coverArt ?? undefined;
+    if (!id) return { coverArtId: undefined, uri: null, isRemote: false };
     if (!opts.skipCache) {
       const cached = mockGetCachedImageUri(id, size);
-      if (cached) return { uri: cached, isRemote: false };
+      if (cached) return { coverArtId: id, uri: cached, isRemote: false };
     }
-    if (opts.offline || mockIsRemoteFailed(id)) return null;
+    if (opts.offline || mockIsRemoteFailed(id)) return { coverArtId: id, uri: null, isRemote: false };
     const remote = mockBuildRemoteImageUrl(id, size);
-    return remote ? { uri: remote, isRemote: true } : null;
+    return { coverArtId: id, uri: remote, isRemote: remote != null };
   },
   ensureCached: (id: string) => mockEnsureCached(id),
   reportBadCache: (id: string, size: number) => mockReportBadCache(id, size),

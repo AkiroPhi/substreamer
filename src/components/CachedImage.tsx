@@ -176,16 +176,17 @@ export const CachedImage = memo(function CachedImage({
       return;
     }
     let cancelled = false;
-    resolveDisplayImage(coverArtId, size, {
+    resolveDisplayImage({ coverArt: coverArtId }, size, {
       offline,
       skipCache: localErroredRef.current,
     })
       .then((r) => {
         if (cancelled) return;
-        setResolved(r);
+        const shown = r.uri ? { uri: r.uri, isRemote: r.isRemote } : null;
+        setResolved(shown);
         // Cache miss (no local file) → fetch it; NOT when we deliberately
         // skipped a bad cached file (it exists; reportBadCache handled it).
-        if (!localErroredRef.current && (r == null || r.isRemote)) {
+        if (!localErroredRef.current && (shown == null || shown.isRemote)) {
           ensureCached(coverArtId);
         }
       })
