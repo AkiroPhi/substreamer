@@ -14,7 +14,7 @@ jest.mock('../../../hooks/useTheme', () => ({
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
 import { CastButton } from '../CastButton';
-import { CAST_BUTTON_PREPOSITION, localRouteDisplayName } from '../copy';
+import { listeningOnLabel, localRouteDisplayName } from '../copy';
 import { useRoutePickerStore } from '../useRoutePickerStore';
 
 describe('CastButton', () => {
@@ -25,7 +25,7 @@ describe('CastButton', () => {
   it('shows the local device when no cast session is active', () => {
     render(<CastButton />);
     // Default RNQP mock: local route + built-in speaker → local device label.
-    expect(screen.getByText(CAST_BUTTON_PREPOSITION, { exact: false })).toBeTruthy();
+    expect(screen.getByText(listeningOnLabel(), { exact: false })).toBeTruthy();
     expect(screen.getByText(localRouteDisplayName())).toBeTruthy();
     // Built-in speaker maps to the phone glyph.
     expect(screen.getByTestId('icon-cellphone')).toBeTruthy();

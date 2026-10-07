@@ -1,8 +1,9 @@
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons/static';
+import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { useAudioRoute, useCast } from 'react-native-queue-player';
 
-import { CAST_BUTTON_PREPOSITION, castButtonLabel } from './copy';
+import { castButtonA11yLabel, castButtonLabel, listeningOnLabel } from './copy';
 import { iconForAudioRoute, iconForCastProtocol } from './iconForRoute';
 import { type RoutePickerTheme } from './types';
 import { useRoutePickerTheme } from './useRoutePickerTheme';
@@ -19,6 +20,8 @@ export interface CastButtonProps {
  * cast session name (useCast) and the system audio route (useAudioRoute).
  */
 export function CastButton({ theme }: CastButtonProps) {
+  // Subscribes to language changes; the copy helpers read the active language.
+  useTranslation();
   const t = useRoutePickerTheme(theme);
   const snapshot = useCast();
   const audioRoute = useAudioRoute();
@@ -39,14 +42,14 @@ export function CastButton({ theme }: CastButtonProps) {
     <Pressable
       onPress={openPicker}
       accessibilityRole="button"
-      accessibilityLabel={`${CAST_BUTTON_PREPOSITION} ${label}. Tap to change.`}
+      accessibilityLabel={castButtonA11yLabel(label)}
       testID="cast-button"
       hitSlop={8}
       style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
     >
       <MaterialCommunityIcons name={iconName} size={16} color={lineColor} />
       <Text numberOfLines={1} style={[styles.line, { color: lineColor }]}>
-        {CAST_BUTTON_PREPOSITION}{' '}
+        {listeningOnLabel()}{' '}
         <Text style={styles.deviceName}>{label}</Text>
       </Text>
     </Pressable>

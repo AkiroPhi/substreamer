@@ -1,11 +1,15 @@
 import type { AudioRoute } from 'react-native-queue-player';
 
 import {
+  castActiveLocalSubtitle,
+  castButtonA11yLabel,
   castButtonLabel,
+  listeningOnLabel,
   localRouteDisplayName,
   rowSubtitle,
   startCastingA11yLabel,
   stopCastingA11yLabel,
+  systemRouteActiveLocalSubtitle,
 } from '../copy';
 import { iconForAudioRoute, iconForCastProtocol, iconForRoute } from '../iconForRoute';
 import type { RouteInfo } from '../types';
@@ -135,6 +139,18 @@ describe('a11y labels', () => {
   it('distinguishes stop vs start listening', () => {
     expect(stopCastingA11yLabel('Den TV')).toBe('Stop listening on Den TV');
     expect(startCastingA11yLabel('Den TV')).toBe('Listen on Den TV');
+  });
+
+  it('names the current route on the cast button', () => {
+    expect(castButtonA11yLabel('Den TV')).toBe('Listening on Den TV. Tap to change.');
+  });
+});
+
+describe('fixed copy', () => {
+  it('reads the title and local-row subtitles from the translations', () => {
+    expect(listeningOnLabel()).toBe('Listening on');
+    expect(systemRouteActiveLocalSubtitle()).toBe('Use the AirPlay & Bluetooth picker to switch back');
+    expect(castActiveLocalSubtitle()).toBe('Tap to switch back here');
   });
 });
 

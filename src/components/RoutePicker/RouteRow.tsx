@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons/static';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
@@ -33,6 +34,7 @@ export interface RouteRowProps {
  * host BottomSheet lifts itself above the keyboard.
  */
 export function RouteRow({ route, onConnect, onDisconnect, subtitleOverride, theme: t }: RouteRowProps) {
+  const { t: tr } = useTranslation();
   const [pinExpanded, setPinExpanded] = useState(false);
   const [pin, setPin] = useState('');
   const [pinFocused, setPinFocused] = useState(false);
@@ -115,7 +117,7 @@ export function RouteRow({ route, onConnect, onDisconnect, subtitleOverride, the
             onChangeText={setPin}
             onFocus={() => setPinFocused(true)}
             onBlur={() => setPinFocused(false)}
-            placeholder="PIN or password"
+            placeholder={tr('routePinOrPassword')}
             placeholderTextColor={t.textSubtle}
             secureTextEntry
             autoCapitalize="none"
@@ -141,7 +143,7 @@ export function RouteRow({ route, onConnect, onDisconnect, subtitleOverride, the
               pressed && { opacity: 0.7 },
             ]}
           >
-            <Text style={{ color: t.background, fontSize: 13, fontWeight: '700' }}>Connect</Text>
+            <Text style={{ color: t.background, fontSize: 13, fontWeight: '700' }}>{tr('routeConnect')}</Text>
           </Pressable>
         </View>
       )}

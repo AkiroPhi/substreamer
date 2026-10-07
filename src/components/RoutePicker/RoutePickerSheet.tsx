@@ -1,13 +1,14 @@
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons/static';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Cast, useAudioRoute } from 'react-native-queue-player';
 
 import { BottomSheet } from '../BottomSheet';
 import {
-  CAST_ACTIVE_LOCAL_SUBTITLE,
-  SHEET_TITLE,
-  SYSTEM_ROUTE_ACTIVE_LOCAL_SUBTITLE,
+  castActiveLocalSubtitle,
+  listeningOnLabel,
+  systemRouteActiveLocalSubtitle,
 } from './copy';
 import { RouteRow } from './RouteRow';
 import { type RouteInfo, type RoutePickerTheme } from './types';
@@ -46,6 +47,7 @@ export function RoutePickerSheet({ theme }: RoutePickerSheetProps = {}) {
 }
 
 function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; onClose: () => void }) {
+  const { t: tr } = useTranslation();
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -113,7 +115,7 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
   return (
     <View>
       <View style={styles.header}>
-        <Text style={[styles.headerKicker, { color: t.textSubtle }]}>{SHEET_TITLE}</Text>
+        <Text style={[styles.headerKicker, { color: t.textSubtle }]}>{listeningOnLabel()}</Text>
       </View>
       <View>
         {renderedRoutes.map((r, idx) => (
@@ -133,7 +135,7 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
       </View>
       {showSearching && (
         <View style={styles.empty}>
-          <Text style={{ color: t.textSubtle }}>Looking for nearby devices…</Text>
+          <Text style={{ color: t.textSubtle }}>{tr('routeLookingForDevices')}</Text>
         </View>
       )}
       {/* Never asked, or asked and not yet answered. Settings is the WRONG place to send
@@ -142,10 +144,10 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
       {state === 'permission-pending' && (
         <View style={styles.empty}>
           <Text style={{ color: t.text, fontWeight: '600' }}>
-            Allow Substreamer to find devices
+            {tr('routeAllowFindDevices')}
           </Text>
           <Text style={{ color: t.textSubtle, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
-            Chromecast and speakers are discovered on your local network.
+            {tr('routeDiscoveryExplanation')}
           </Text>
           <Pressable
             testID="route-picker-request-permission"
@@ -154,33 +156,37 @@ function RoutePickerContent({ theme: t, onClose }: { theme: RoutePickerTheme; on
             hitSlop={8}
           >
             <Text style={{ color: t.accent, fontSize: 13, marginTop: 8, fontWeight: '600' }}>
-              Allow Local Network access
+              {tr('routeAllowLocalNetwork')}
             </Text>
           </Pressable>
         </View>
       )}
       {state === 'permission-denied' && (
         <View style={styles.empty}>
-          <Text style={{ color: t.errorIndicator, fontWeight: '600' }}>
-            Local Network access is off
+          <Text style={{ color: t.errorIndicator, fontWeight: '600', textAlign: 'center' }}>
+            {tr('routeLocalNetworkNotGranted')}
+          </Text>
+          <Text style={{ color: t.textSubtle, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+            {tr('routeLocalNetworkNeeded')}
           </Text>
           {/* Only once genuinely denied has the app been asked, so it now HAS an entry in
-              Settings and sending the user there actually leads somewhere. */}
+              Settings and sending the user there actually leads somewhere. iOS has no public
+              link to the toggle itself; this opens the app's own Settings page. */}
           <Pressable
             testID="route-picker-open-settings"
             onPress={() => { void Linking.openSettings(); }}
             accessibilityRole="button"
             hitSlop={8}
           >
-            <Text style={{ color: t.accent, fontSize: 12, marginTop: 4 }}>
-              Turn on Local Network for Substreamer in Settings.
+            <Text style={{ color: t.accent, fontSize: 13, marginTop: 8, fontWeight: '600' }}>
+              {tr('routeOpenSettingsAndAllow')}
             </Text>
           </Pressable>
         </View>
       )}
       {state === 'error' && (
         <View style={styles.empty}>
-          <Text style={{ color: t.errorIndicator, fontSize: 12 }}>Cast unavailable on this build</Text>
+          <Text style={{ color: t.errorIndicator, fontSize: 12 }}>{tr('routeCastUnavailable')}</Text>
         </View>
       )}
     </View>
@@ -193,8 +199,8 @@ function routeKey(r: RouteInfo): string {
 
 function localSubtitleOverride(route: RouteInfo, systemRouteActive: boolean): string | undefined {
   if (route.protocol !== 'local') return undefined;
-  if (systemRouteActive) return SYSTEM_ROUTE_ACTIVE_LOCAL_SUBTITLE;
-  if (!route.isActive) return CAST_ACTIVE_LOCAL_SUBTITLE;
+  if (systemRouteActive) return systemRouteActiveLocalSubtitle();
+  if (!route.isActive) return castActiveLocalSubtitle();
   return undefined;
 }
 
@@ -208,7 +214,8 @@ function SystemPickerRow({
   active: boolean;
   routeName: string;
 }) {
-  const subtitle = active && routeName.length > 0 ? routeName : 'Open system picker';
+  const { t: tr } = useTranslation();
+  const subtitle = active && routeName.length > 0 ? routeName : tr('routeOpenSystemPicker');
   return (
     <Pressable
       testID="route-row-system-picker"
@@ -216,7 +223,7 @@ function SystemPickerRow({
         void Cast.showSystemPicker().catch(() => {});
       }}
       accessibilityRole="button"
-      accessibilityLabel="Open AirPlay and Bluetooth device picker"
+      accessibilityLabel={tr('routeOpenSystemPickerA11y')}
       accessibilityState={{ selected: active }}
       style={({ pressed }) => [
         styles.row,
@@ -229,7 +236,7 @@ function SystemPickerRow({
       </View>
       <View style={styles.labelStack}>
         <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>
-          AirPlay & Bluetooth
+          {tr('routeAirplayBluetooth')}
         </Text>
         <Text style={{ color: theme.textSubtle, fontSize: 12 }} numberOfLines={1}>
           {subtitle}

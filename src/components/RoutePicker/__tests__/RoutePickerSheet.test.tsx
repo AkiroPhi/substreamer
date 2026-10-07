@@ -24,7 +24,7 @@ jest.mock('../../BottomSheet', () => {
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 
-import { SHEET_TITLE } from '../copy';
+import { listeningOnLabel } from '../copy';
 import { RoutePickerSheet } from '../RoutePickerSheet';
 import { useRoutePickerStore } from '../useRoutePickerStore';
 
@@ -54,7 +54,7 @@ describe('RoutePickerSheet', () => {
     act(() => useRoutePickerStore.getState().open());
     render(<RoutePickerSheet />);
     expect(screen.getByTestId('bottom-sheet')).toBeTruthy();
-    expect(screen.getByText(SHEET_TITLE)).toBeTruthy();
+    expect(screen.getByText(listeningOnLabel())).toBeTruthy();
     // Discovery is scoped to the open sheet (mounted inner content only).
     expect(rnqp.Cast.startDiscovery).toHaveBeenCalled();
     // Already granted: no probe (and no prompt) needed.
@@ -70,12 +70,16 @@ describe('RoutePickerSheet', () => {
     await flush();
   });
 
-  it('shows the denied state with a tappable Open Settings when local network is denied', async () => {
+  it('explains the denied state and offers Open Settings & Allow when local network is denied', async () => {
     rnqp.__setCastSnapshot({ permission: 'denied' });
     const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
     act(() => useRoutePickerStore.getState().open());
     render(<RoutePickerSheet />);
-    expect(screen.getByText('Local Network access is off')).toBeTruthy();
+    expect(screen.getByText('Local Network Permission has not been granted.')).toBeTruthy();
+    expect(
+      screen.getByText('Substreamer needs this to be able to find Chromecast receivers on your network.'),
+    ).toBeTruthy();
+    expect(screen.getByText('Open Settings & Allow')).toBeTruthy();
     fireEvent.press(screen.getByTestId('route-picker-open-settings'));
     expect(openSettings).toHaveBeenCalledTimes(1);
     openSettings.mockRestore();

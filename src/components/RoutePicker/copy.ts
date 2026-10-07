@@ -1,23 +1,28 @@
 import { Platform } from 'react-native';
 import type { AudioRoute } from 'react-native-queue-player';
+
+import i18n from '../../i18n/i18n';
 import type { RouteInfo } from './types';
 
 /**
  * User-facing copy for the route picker, in one place so the picker, the button,
  * and screen-reader announcements speak with one voice. Follows the "Listening
- * on" convention for audio context.
- *
- * TODO(phase-2): route these through i18n once the picker ships in all locales.
+ * on" convention for audio context. Protocol names (AirPlay, Chromecast) are
+ * product names and stay untranslated.
  */
 
-const localDeviceLabel = Platform.OS === 'ios' ? 'This iPhone' : 'This device';
+function localDeviceLabel(): string {
+  return Platform.OS === 'ios' ? i18n.t('routeThisIphone') : i18n.t('thisDevice');
+}
 
-/** Title for the sheet header. */
-export const SHEET_TITLE = 'Listening on';
+/** Title for the sheet header, and the CastButton's inline preposition ("Listening on X"). */
+export function listeningOnLabel(): string {
+  return i18n.t('routeListeningOn');
+}
 
 /** Subtitle line under the device name on each row. */
 export function rowSubtitle(route: RouteInfo): string {
-  if (route.protocol === 'local') return 'Currently listening here';
+  if (route.protocol === 'local') return i18n.t('routeCurrentlyListeningHere');
   const protoBits: string[] = [];
   if (route.protocol === 'airplay') {
     protoBits.push(`AirPlay${route.protocolVersion ? ' ' + route.protocolVersion : ''}`);
@@ -27,20 +32,23 @@ export function rowSubtitle(route: RouteInfo): string {
     protoBits.push(route.protocol);
   }
   if (route.modelName.length > 0) protoBits.push(route.modelName);
-  if (route.lastError) protoBits.push(`Couldn't connect`);
+  if (route.lastError) protoBits.push(i18n.t('routeCouldntConnect'));
   return protoBits.join(' • ');
 }
 
 /** Local-row subtitle while audio is routed to an OS-managed AirPlay/BT device. */
-export const SYSTEM_ROUTE_ACTIVE_LOCAL_SUBTITLE =
-  'Use the AirPlay & Bluetooth picker to switch back';
+export function systemRouteActiveLocalSubtitle(): string {
+  return i18n.t('routeSystemActiveLocalSubtitle');
+}
 
 /** Local-row subtitle while a lib-managed cast route (Chromecast) is active. */
-export const CAST_ACTIVE_LOCAL_SUBTITLE = 'Tap to switch back here';
+export function castActiveLocalSubtitle(): string {
+  return i18n.t('routeCastActiveLocalSubtitle');
+}
 
 /** Friendly name for the local device row. */
 export function localRouteDisplayName(): string {
-  return localDeviceLabel;
+  return localDeviceLabel();
 }
 
 /** Text the player-screen CastButton displays — the active route's name. */
@@ -56,18 +64,20 @@ export function castButtonLabel(audioRoute: AudioRoute, activeCastName: string |
   ) {
     return audioRoute.name;
   }
-  return localDeviceLabel;
+  return localDeviceLabel();
+}
+
+/** A11y label for the CastButton. */
+export function castButtonA11yLabel(name: string): string {
+  return i18n.t('routeCastButtonA11y', { name });
 }
 
 /** A11y label for the active receiver row (disconnect target). */
 export function stopCastingA11yLabel(name: string): string {
-  return `Stop listening on ${name}`;
+  return i18n.t('routeStopListeningOn', { name });
 }
 
 /** A11y label for an idle, tappable receiver row. */
 export function startCastingA11yLabel(name: string): string {
-  return `Listen on ${name}`;
+  return i18n.t('routeListenOn', { name });
 }
-
-/** Preposition the CastButton uses inline ("Listening on X"). */
-export const CAST_BUTTON_PREPOSITION = 'Listening on';
