@@ -654,7 +654,6 @@
   "songDownloadRemoved": "Удалено \"{{title}}\"",
   "removeDownload": "Удалить загрузку",
   "deletePlaylist": "Удалить плейлист",
-  "noOptionsOffline": "В офлайн-режиме нет дополнительных опций",
   "deletePlaylistConfirmMessage": "Вы уверены, что хотите удалить \"{{name}}\"?",
   "deleting": "Удаление…",
   "playlistDeleted": "Плейлист удален",

@@ -654,7 +654,6 @@
   "songDownloadRemoved": "« {{title}} » supprimé",
   "removeDownload": "Supprimer le téléchargement",
   "deletePlaylist": "Supprimer la playlist",
-  "noOptionsOffline": "Aucune option supplémentaire disponible en mode hors ligne",
   "deletePlaylistConfirmMessage": "Êtes-vous sûr de vouloir supprimer « {{name}} » ?",
   "deleting": "Suppression…",
   "playlistDeleted": "Playlist supprimée",

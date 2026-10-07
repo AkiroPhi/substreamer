@@ -189,9 +189,7 @@ export function AddToPlaylistSheet() {
 
   const handleSelectPlaylist = useCallback(
     async (playlist: Playlist) => {
-      if (!target || busy) return;
-      setBusy(true);
-      setError(null);
+      if (!target) return;
       handleClose();
       await runWithOverlay(
         async () => {
@@ -214,7 +212,7 @@ export function AddToPlaylistSheet() {
         { loading: t('adding'), success: t('addedToPlaylist'), error: t('failedToAddToPlaylist') },
       );
     },
-    [target, busy, handleClose],
+    [target, handleClose],
   );
 
   const handleCreatePlaylist = useCallback(async () => {

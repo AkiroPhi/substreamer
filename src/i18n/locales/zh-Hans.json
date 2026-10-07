@@ -654,7 +654,6 @@
   "songDownloadRemoved": "已移除\"{{title}}\"",
   "removeDownload": "移除下载",
   "deletePlaylist": "删除播放列表",
-  "noOptionsOffline": "离线模式下没有其他选项",
   "deletePlaylistConfirmMessage": "确认删除“{{name}}”吗？",
   "deleting": "正在删除…",
   "playlistDeleted": "播放列表已删除",

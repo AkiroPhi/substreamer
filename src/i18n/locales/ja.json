@@ -654,7 +654,6 @@
   "songDownloadRemoved": "「{{title}}」を削除しました",
   "removeDownload": "ダウンロードを削除",
   "deletePlaylist": "プレイリストを削除",
-  "noOptionsOffline": "オフラインモードで利用可能な追加オプションがありません",
   "deletePlaylistConfirmMessage": "本当に「{{name}}」を削除しますか？",
   "deleting": "削除中…",
   "playlistDeleted": "プレイリストを削除しました",

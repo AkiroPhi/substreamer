@@ -298,13 +298,9 @@ export function MoreOptionsSheet() {
   const pathname = usePathname();
 
   const isScrobbleExcluded = scrobbleExclusionStore((s) => {
-    if (!entity || !canExcludeFromScrobbling(entity)) return false;
-    switch (entity.type) {
-      case 'album': return entity.item.id in s.excludedAlbums;
-      case 'artist': return entity.item.id in s.excludedArtists;
-      case 'playlist': return entity.item.id in s.excludedPlaylists;
-      default: return false;
-    }
+    if (entity?.type === 'album') return entity.item.id in s.excludedAlbums;
+    if (entity?.type === 'artist') return entity.item.id in s.excludedArtists;
+    return false;
   });
 
   const [busy, setBusy] = useState(false);
@@ -319,8 +315,7 @@ export function MoreOptionsSheet() {
   /* ---- Actions ---- */
 
   const handleToggleStar = useCallback(async () => {
-    if (!entity || busy) return;
-    if (!isStarrable(entity)) return;
+    if (!entity) return;
     setBusy(true);
     try {
       await toggleStar(entity.type as 'song' | 'album' | 'artist', entity.item.id);
@@ -330,7 +325,7 @@ export function MoreOptionsSheet() {
       setBusy(false);
       handleClose();
     }
-  }, [entity, busy, handleClose]);
+  }, [entity, handleClose]);
 
   const handleAddToPlaylist = useCallback(async () => {
     if (!entity) return;
@@ -472,7 +467,7 @@ export function MoreOptionsSheet() {
   }, [entity]);
 
   const handleDownload = useCallback(async () => {
-    if (!entity || !canDownload(entity)) return;
+    if (!entity) return;
     handleClose();
     try {
       if (downloadStatus === 'complete') {
@@ -534,7 +529,7 @@ export function MoreOptionsSheet() {
   }, [entity]);
 
   const handleSetRating = useCallback(async () => {
-    if (!entity || !isRatable(entity)) return;
+    if (!entity) return;
     // The same cover the rest of the app shows for this entity.
     const coverArtId = await resolveCoverArtId(coverSubject(entity));
     await moreOptionsStore.getState().hideAndAwait();
@@ -601,7 +596,7 @@ export function MoreOptionsSheet() {
   }, [entity, pathname, router, alert, t]);
 
   const handleToggleScrobbleExclusion = useCallback(() => {
-    if (!entity || !canExcludeFromScrobbling(entity)) return;
+    if (!entity) return;
     const type = entity.type as ScrobbleExclusionType;
     const name = (entity.item as AlbumID3 | Playlist).name ?? '';
     if (isScrobbleExcluded) {
@@ -682,13 +677,6 @@ export function MoreOptionsSheet() {
   const showSetMbid = (entity?.type === 'artist' || entity?.type === 'album') && !isVA;
   const showScrobbleExclusion = canExcludeFromScrobbling(entity);
 
-  const hasAnyOption =
-    starrable || showRating || showAddToPlaylist || showAddQueueToPlaylist ||
-    showAddToQueue || showPlayNext || showPlayMoreLikeThis || showPlaySimilarArtistsMix ||
-    showPlayMoreByArtist || showDownload || showDownloadSong || showRemoveSongDownload ||
-    showAlbumLink || showArtistLink || showShare || showDetails || showTrackDetails || showDelete ||
-    showSaveTopSongsPlaylist || showSetMbid || showScrobbleExclusion;
-
   return (
     <>
       <BottomSheet
@@ -742,16 +730,6 @@ export function MoreOptionsSheet() {
                   </Text>
                 </View>
               </View>
-
-              {/* Empty state when no options are available */}
-              {!hasAnyOption && (
-                <View style={styles.emptyOptions}>
-                  <Ionicons name="cloud-offline-outline" size={32} color={colors.primary} />
-                  <Text style={[styles.emptyOptionsText, { color: colors.textSecondary }]}>
-                    {t('noOptionsOffline')}
-                  </Text>
-                </View>
-              )}
 
               {/* Favorite / Unfavorite */}
               {starrable && (
@@ -1047,15 +1025,6 @@ const styles = StyleSheet.create({
   sheetSubtitle: {
     fontSize: 14,
     fontWeight: '400',
-  },
-  emptyOptions: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    gap: 12,
-  },
-  emptyOptionsText: {
-    fontSize: 14,
-    textAlign: 'center',
   },
   option: {
     flexDirection: 'row',
