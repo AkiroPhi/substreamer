@@ -1,7 +1,6 @@
 import ExpoMoveToBackModule from '../ExpoMoveToBackModule';
 import { moveToBack } from '../index';
 
-jest.mock('../ExpoMoveToBackModule');
 
 const mockModule = jest.mocked(ExpoMoveToBackModule);
 

@@ -8,7 +8,6 @@ import {
   addDownloadProgressListener,
 } from '../index';
 
-jest.mock('../ExpoAsyncFsModule');
 
 const mockModule = jest.mocked(ExpoAsyncFsModule);
 

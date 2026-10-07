@@ -21,7 +21,6 @@ import type {
   TrustStoreInstallStatus,
 } from '../ExpoSslTrust';
 
-jest.mock('../ExpoSslTrustModule');
 
 const mockModule = jest.mocked(ExpoSslTrustModule);
 

@@ -10,6 +10,7 @@
  *  - a module calls `requireNativeModule('<Name>')` but has no `mocks/<Name>.ts`. jest-expo
  *    loads that file as the native module in every test, so suites need no per-suite mock and
  *    print no "Native module not found" warning.
+ *  - a module also carries a `src/__mocks__/` manual mock: `mocks/<Name>.ts` is the one mock.
  *
  * Warnings (do not fail CI):
  *  - A module has tests but isn't represented in `collectCoverageFrom`
@@ -50,6 +51,12 @@ function main() {
   for (const name of fs.readdirSync(modulesDir)) {
     const srcDir = path.join(modulesDir, name, 'src');
     if (!fs.existsSync(srcDir)) continue;
+    if (fs.existsSync(path.join(srcDir, '__mocks__'))) {
+      console.error(
+        `[validate-module-inventory] modules/${name}/src/__mocks__ duplicates mocks/ — test against the jest-expo mock`,
+      );
+      errors++;
+    }
     for (const file of fs.readdirSync(srcDir)) {
       if (!/\.tsx?$/.test(file)) continue;
       const source = fs.readFileSync(path.join(srcDir, file), 'utf8');

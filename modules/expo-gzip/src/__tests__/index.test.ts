@@ -1,7 +1,6 @@
 import ExpoGzipModule from '../ExpoGzipModule';
 import { compressToFile, decompressFromFile } from '../index';
 
-jest.mock('../ExpoGzipModule');
 
 const mockModule = jest.mocked(ExpoGzipModule);
 

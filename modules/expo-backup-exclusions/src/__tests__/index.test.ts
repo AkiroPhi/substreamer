@@ -1,7 +1,6 @@
 import ExpoBackupExclusionsModule from '../ExpoBackupExclusionsModule';
 import { excludeFromBackup } from '../index';
 
-jest.mock('../ExpoBackupExclusionsModule');
 
 const mockModule = jest.mocked(ExpoBackupExclusionsModule);
 
