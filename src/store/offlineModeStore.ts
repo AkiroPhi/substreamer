@@ -45,8 +45,8 @@ let _filterBarSyncUnsub: (() => void) | null = null;
  * consistent. Idempotent — repeat calls return the same teardown handle.
  *
  * Lives in a helper (not at module scope) so the side effect doesn't fire
- * during test imports — preserves test isolation. Called from
- * `runDeferredStartup` in `src/app/_layout.tsx` at post-login boot time.
+ * during test imports — preserves test isolation. Called from the root
+ * layout's mount effect in `src/app/_layout.tsx`.
  */
 export function initializeOfflineFilterBarSync(): () => void {
   if (_filterBarSyncUnsub) return _filterBarSyncUnsub;
@@ -59,9 +59,7 @@ export function initializeOfflineFilterBarSync(): () => void {
   // Initial sync for the already-hydrated case. offlineModeStore persists
   // via the async kvStorage adapter, so if this runs before hydration the read
   // sees the default (false) — the `subscribe` above (registered first) then
-  // fires on the hydration transition and corrects the filter bar. The
-  // startup chain also awaits `awaitKvHydration()` (which includes
-  // offlineModeStore) before its offline-dependent work.
+  // fires on the hydration transition and corrects the filter bar.
   if (offlineModeStore.getState().offlineMode) {
     filterBarStore.getState().setDownloadedOnly(true);
   }

@@ -232,11 +232,6 @@ async function runDeferredStartup(getCancelled: () => boolean): Promise<void> {
     runWhenIdle(() => { if (!getCancelled()) void stage(name, fn); });
   };
 
-  // Boot owns this subscription setup: at module scope, merely importing the module in a
-  // test would trigger the cross-store side effect.
-  await stage('initializeOfflineFilterBarSync', () => { initializeOfflineFilterBarSync(); });
-  if (getCancelled()) return;
-
   await stage('deferredImageCacheInit', () => deferredImageCacheInit());
   if (getCancelled()) return;
   await stage('deferredMusicCacheInit', () => deferredMusicCacheInit());
@@ -412,6 +407,10 @@ export default function RootLayout() {
   const handleCertCancel = useCallback(() => {
     certPromptStore.getState().hide();
   }, []);
+
+  // Offline mode forces the Downloaded filter. Wired at mount, not in the deferred startup
+  // chain, so the filter is already set when the splash lifts.
+  useEffect(() => initializeOfflineFilterBarSync(), []);
 
   // --- Exclude cache dirs from iCloud backup (iOS); no-op on Android ---
   useEffect(() => {
