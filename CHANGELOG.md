@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.1.6] - 2026-10-07
+
+- chore: bump RNQP
+- ci: update coverage badge [skip ci]
+- Use the jest-expo native-module mock as each local module's only mock
+- Remove unreachable guards and the empty state from the options sheets
+- Set the Downloaded filter from offline mode at mount, not after the splash
+- Stop the image cache suite leaking a timer and a mock return value
+- Cover the image cache's branches
+- Cover the CarPlay and Android Auto browse service's branches
+- Cover what each more-options action does
+- Add tests for the add-to-playlist and edit-share sheets
+- Add tests for TopItemRow and the cover palette hooks
+- Assert the warnings that tests drive on purpose
+- Give two suites working kvStorage mocks
+- Settle async loads inside the tests that trigger them
+- Give every local native module a jest-expo mock
+- Remove the in-memory album cover cache
+- Resolve in-app covers through the one cover resolver
+- Cache and protect both covers of every downloaded song
+- Give minimal react-native test mocks a TurboModuleRegistry
+- Use the one cover resolver for player and CarPlay browse artwork
+- Resolve a cover's token and image in one query
+- Resolve favourites' parent albums by server id in Refresh Downloads
+- Fix Tuned In medium mix cards overflowing the row
+- ci: update coverage badge [skip ci]
 ## [8.1.5] - 2026-10-03
 
 - Update react-native-queue-player to 2.0.2
